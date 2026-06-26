@@ -1,0 +1,17 @@
+{
+  "id": "vulos-talk",
+  "name": "Vulos Talk",
+  "icon": "💬",
+  "description": "Team chat with channels, Spaces, DMs, threads, and real-time huddles",
+  "version": "1.0.0",
+  "command": "bin/server",
+  "port": 8080,
+  "type": "web",
+  "category": "productivity",
+  "keywords": ["chat", "talk", "messaging", "channels", "spaces", "huddle"],
+  "auto_start": false,
+  "singleton": true,
+  "permissions": ["network", "storage"],
+  "author": "Vulos",
+  "license": "MIT"
+}
