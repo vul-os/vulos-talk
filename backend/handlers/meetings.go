@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"vulos-talk/backend/billing"
-	meetingsvc "vulos-talk/backend/services/meeting"
 	"vulos-talk/backend/models"
+	meetingsvc "vulos-talk/backend/services/meeting"
 	"vulos-talk/backend/storage"
 
 	"github.com/gin-gonic/gin"

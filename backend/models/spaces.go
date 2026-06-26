@@ -15,9 +15,9 @@ const (
 type MessageState string
 
 const (
-	MessageStateActive  MessageState = "active"
-	MessageStateEdited  MessageState = "edited"
-	MessageStateTombed  MessageState = "deleted" // tombstone; body cleared, converges via CRDT
+	MessageStateActive MessageState = "active"
+	MessageStateEdited MessageState = "edited"
+	MessageStateTombed MessageState = "deleted" // tombstone; body cleared, converges via CRDT
 )
 
 // Channel is a named conversation space (public, private, or DM).
@@ -68,10 +68,10 @@ type Message struct {
 // ReadState records the furthest-read SeqClock per account per channel.
 // Used for unread-count derivation; converges via LWW (highest SeqClock wins).
 type ReadState struct {
-	AccountID    string    `json:"account_id"`
-	ChannelID    string    `json:"channel_id"`
-	LastReadClock string   `json:"last_read_clock"` // SeqClock of last-read message
-	UpdatedAt    time.Time `json:"updated_at"`
+	AccountID     string    `json:"account_id"`
+	ChannelID     string    `json:"channel_id"`
+	LastReadClock string    `json:"last_read_clock"` // SeqClock of last-read message
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // --- CRDT op types (used by the Go store and mirrored in src/lib/crdt/messages.js) ---
@@ -80,8 +80,8 @@ type ReadState struct {
 type MessageOpType string
 
 const (
-	MessageOpAppend  MessageOpType = "append"  // new message
-	MessageOpEdit    MessageOpType = "edit"    // replace body; SeqClock must be higher
+	MessageOpAppend    MessageOpType = "append"    // new message
+	MessageOpEdit      MessageOpType = "edit"      // replace body; SeqClock must be higher
 	MessageOpTombstone MessageOpType = "tombstone" // delete; terminal
 )
 
@@ -160,9 +160,9 @@ type PinRequest struct {
 // UserStatus persists per-user presence status.
 type UserStatus struct {
 	UserID     string    `json:"user_id"`
-	Status     string    `json:"status"`      // online | away | busy | dnd
+	Status     string    `json:"status"` // online | away | busy | dnd
 	CustomText string    `json:"custom_text"`
-	UntilUnix  int64     `json:"until_unix"`  // 0 = indefinite
+	UntilUnix  int64     `json:"until_unix"` // 0 = indefinite
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 

@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"vulos-talk/backend/billing"
+	"vulos-talk/backend/bots"
 	"vulos-talk/backend/config"
 	"vulos-talk/backend/handlers"
 	"vulos-talk/backend/middleware"
@@ -194,6 +195,61 @@ func main() {
 	protected.GET("/spaces/channels/:channelId/search", spacesHandler.SearchMessages)
 	protected.GET("/spaces/channels/:channelId/threads/:parentId", spacesHandler.ListThread)
 	protected.POST("/spaces/channels/:channelId/threads/:parentId/reply", spacesHandler.ReplyThread)
+
+	// -----------------------------------------------------------------------
+	// Bot framework: registry (the seam), dispatcher, admin API, bot REST API,
+	// incoming webhooks, and the SSE event stream.
+	//
+	// The standalone registry lives in-repo (SQLite, env-configurable DSN). A
+	// Vulos Cloud control plane would implement the same bots.Registry in a
+	// separate package wired only here — the core never imports it.
+	// -----------------------------------------------------------------------
+	botsDSN := os.Getenv("VULOS_BOTS_DB")
+	if botsDSN == "" {
+		botsDSN = cfg.Server.DataDir + "/bots.db"
+	}
+	var botRegistry bots.Registry
+	if reg, err := bots.NewStandaloneRegistry(botsDSN); err != nil {
+		log.Printf("bots: durable registry unavailable (%v); using in-memory registry", err)
+		botRegistry = bots.NewMemoryRegistry()
+	} else {
+		botRegistry = reg
+		log.Printf("Bot registry → %s", botsDSN)
+	}
+
+	dispatcher := bots.NewDispatcher(botRegistry, spacesHandler.Store())
+	// Hook the dispatcher into the send/reply/join path and slash-command dispatch.
+	spacesHandler.SetBotSink(dispatcher)
+
+	// Admin API (session-authed, owner-scoped).
+	botsHandler := handlers.NewBotsHandler(botRegistry)
+	protected.GET("/bots", botsHandler.List)
+	protected.POST("/bots", botsHandler.Create)
+	protected.GET("/bots/:id", botsHandler.Get)
+	protected.PUT("/bots/:id", botsHandler.Update)
+	protected.DELETE("/bots/:id", botsHandler.Delete)
+	protected.POST("/bots/:id/rotate-token", botsHandler.RotateToken)
+	protected.POST("/bots/:id/rotate-secret", botsHandler.RotateSecret)
+	// Slash-command catalog for the composer autocomplete (session-authed).
+	protected.GET("/spaces/commands", botsHandler.Commands)
+
+	// Bot REST API (Bearer bot-token authed).
+	botAPIHandler := handlers.NewBotAPIHandler(spacesHandler, botRegistry, dispatcher)
+	botV1 := api.Group("/bot/v1")
+	botV1.Use(middleware.BotAuth(botRegistry))
+	botV1.GET("/auth.test", botAPIHandler.AuthTest)
+	botV1.POST("/messages", botAPIHandler.PostMessage)
+	botV1.GET("/channels", botAPIHandler.ListChannels)
+	botV1.GET("/channels/:channelId/history", botAPIHandler.History)
+	botV1.GET("/channels/:channelId/members", botAPIHandler.Members)
+	botV1.POST("/reactions", botAPIHandler.AddReaction)
+	botV1.DELETE("/reactions", botAPIHandler.RemoveReaction)
+	// Socket-mode style SSE event stream.
+	botEventsHandler := handlers.NewBotEventsHandler(dispatcher)
+	botV1.GET("/events", botEventsHandler.Stream)
+
+	// Incoming webhooks: NO auth header — the webhook id in the path is the secret.
+	api.POST("/bot/hooks/:webhookId", botAPIHandler.IncomingWebhook)
 
 	// Serve the embedded SPA (history-API fallback to index.html).
 	staticFS, err := fs.Sub(distFS, "dist")

@@ -3,8 +3,8 @@ package spaces_test
 import (
 	"testing"
 
-	"vulos-talk/backend/spaces"
 	"vulos-talk/backend/models"
+	"vulos-talk/backend/spaces"
 )
 
 // openStore returns a SpacesStore backed by an in-memory NullPersister.

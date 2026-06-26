@@ -24,7 +24,20 @@ import (
 type SpacesHandler struct {
 	mu    sync.RWMutex
 	store *spaces.SpacesStore
+
+	// botSink, when set (via SetBotSink in main.go), receives send/reply/join
+	// events and intercepts slash commands. nil when the bot framework is not
+	// wired, keeping the spaces handler usable standalone.
+	botSink BotSink
 }
+
+// SetBotSink wires the bot dispatcher into the spaces handler. Call once at
+// startup; safe before serving traffic.
+func (h *SpacesHandler) SetBotSink(s BotSink) { h.botSink = s }
+
+// Store exposes the underlying SpacesStore so the composition root can build the
+// bot dispatcher's channel-visibility view (it satisfies bots.Spaces).
+func (h *SpacesHandler) Store() *spaces.SpacesStore { return h.store }
 
 // spacesDBPath resolves the SQLite DSN from env, defaulting to a durable file.
 func spacesDBPath() string {
@@ -200,6 +213,9 @@ func (h *SpacesHandler) JoinChannel(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if h.botSink != nil {
+		h.botSink.OnMemberJoined(channelID, accountID)
+	}
 	c.JSON(http.StatusOK, m)
 }
 
@@ -280,12 +296,49 @@ func (h *SpacesHandler) SendMessage(c *gin.Context) {
 	if !h.requireChannelAccess(c, channelID, authorID) {
 		return
 	}
+	// Slash-command interception: a body like "/deploy ..." that matches a
+	// registered command is dispatched to the owning bot and NOT stored as a
+	// channel message. Unknown commands fall through and post normally.
+	if h.botSink != nil && strings.HasPrefix(strings.TrimSpace(req.Body), "/") {
+		if h.botSink.MaybeHandleSlash(channelID, authorID, req.Body) {
+			cmd, _, _ := parseSlashCommand(req.Body)
+			c.JSON(http.StatusOK, gin.H{"slash": true, "command": cmd, "dispatched": true})
+			return
+		}
+	}
 	msg, err := h.store.SendMessage(channelID, authorID, req.Body, req.ThreadParent)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if h.botSink != nil {
+		h.botSink.OnMessageCreated(msg.ChannelID, msg.ID, msg.AuthorID, msg.Body, msg.ThreadParent)
+	}
 	c.JSON(http.StatusCreated, msg)
+}
+
+// parseSlashCommand extracts the command name (without slash) and args from a
+// message body. ok is false when body is not a "/command" form. Mirrors
+// bots.ParseSlash so the handler need not import the bots package for the
+// response shape.
+func parseSlashCommand(body string) (name, args string, ok bool) {
+	trimmed := strings.TrimSpace(body)
+	if !strings.HasPrefix(trimmed, "/") {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(trimmed, "/")
+	if rest == "" {
+		return "", "", false
+	}
+	parts := strings.SplitN(rest, " ", 2)
+	name = strings.ToLower(strings.TrimSpace(parts[0]))
+	if name == "" {
+		return "", "", false
+	}
+	if len(parts) == 2 {
+		args = strings.TrimSpace(parts[1])
+	}
+	return name, args, true
 }
 
 func (h *SpacesHandler) EditMessage(c *gin.Context) {

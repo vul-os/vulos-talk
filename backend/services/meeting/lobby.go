@@ -22,8 +22,8 @@ import (
 
 // WaitingEntry is a participant waiting in the lobby.
 type WaitingEntry struct {
-	Nonce       string    `json:"nonce"`         // from join token — ties lobby slot to a specific request
-	AccountID   string    `json:"account_id"`    // empty for anonymous
+	Nonce       string    `json:"nonce"`      // from join token — ties lobby slot to a specific request
+	AccountID   string    `json:"account_id"` // empty for anonymous
 	DisplayName string    `json:"display_name"`
 	Email       string    `json:"email,omitempty"`
 	IP          string    `json:"ip"`

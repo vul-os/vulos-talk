@@ -9,10 +9,10 @@ type MeetingRecording struct {
 	RoomID      string    `json:"room_id"`
 	OrganizerID string    `json:"organizer_id"`
 	AccountID   string    `json:"account_id"` // uploader
-	FileName    string    `json:"file_name"`   // e.g. "recording-<id>.webm"
+	FileName    string    `json:"file_name"`  // e.g. "recording-<id>.webm"
 	SizeBytes   int64     `json:"size_bytes"`
 	DurationSec int       `json:"duration_sec,omitempty"`
-	BucketKey   string    `json:"bucket_key"`  // org-scoped S3 key
+	BucketKey   string    `json:"bucket_key"` // org-scoped S3 key
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -34,7 +34,7 @@ type Meeting struct {
 	Title            string        `json:"title"`
 	SessionID        string        `json:"session_id"` // fabric session / room id fed into createCall
 	HostVulos        string        `json:"host_vulos"`
-	Invitees         []string      `json:"invitees"`             // Vulos account addresses (@vulos.org)
+	Invitees         []string      `json:"invitees"` // Vulos account addresses (@vulos.org)
 	ScheduledAt      *time.Time    `json:"scheduled_at,omitempty"`
 	DurationMin      int           `json:"duration_min,omitempty"` // 0 = open-ended
 	Status           MeetingStatus `json:"status"`

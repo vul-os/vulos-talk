@@ -193,7 +193,51 @@ async function main() {
       results.push(await shot(page, 'dm', 'Direct message between two teammates'))
     }
 
-    // 4. Huddles — the meeting/scheduling dashboard (/meet/:id renders it).
+    // 4. In-channel search — open the search panel in #general and run a query.
+    await gotoChannel('/channels/general')
+    const searchBtn = page.locator('button[aria-label="Search in channel"], button[title="Search in channel"]').first()
+    if (await searchBtn.count()) {
+      await searchBtn.click().catch(() => {})
+      await sleep(400)
+      const searchInput = page.locator('input[type="search"], input[placeholder*="earch"]').first()
+      if (await searchInput.count()) {
+        await searchInput.fill('durable').catch(() => {})
+        await sleep(900)
+      }
+      results.push(await shot(page, 'search', 'In-channel search with live results'))
+    }
+
+    // 5. Slash-command autocomplete — type "/" in the composer to surface the
+    //    registered bot commands (fed by GET /api/spaces/commands).
+    await gotoChannel('/channels/general')
+    const composer = page.locator('textarea').first()
+    if (await composer.count()) {
+      await composer.click().catch(() => {})
+      await composer.type('/', { delay: 60 }).catch(() => {})
+      await sleep(800)
+      results.push(await shot(page, 'slash-command', 'Slash-command autocomplete in the composer'))
+      await composer.fill('').catch(() => {})
+    }
+
+    // 6. Apps & Bots — the standalone bot admin console (route /apps).
+    await page.goto(`${BASE}/apps`, { waitUntil: 'domcontentloaded', timeout: 20_000 })
+    await sleep(1_500)
+    results.push(await shot(page, 'bots', 'Apps & Bots — create and manage bot apps + tokens'))
+
+    // 7. Mobile — single-column layout with bottom nav at 390×844.
+    const mobile = await context.newPage()
+    mobile.on('pageerror', () => {})
+    await mobile.setViewportSize({ width: 390, height: 844 })
+    await mobile.goto(`${BASE}/channels/general`, { waitUntil: 'domcontentloaded', timeout: 20_000 })
+    await mobile.waitForSelector('[data-msg-id]', { timeout: 15_000 }).catch(() => {})
+    await sleep(1_200)
+    const mOut = path.join(OUT, 'mobile.png')
+    await mobile.screenshot({ path: mOut, fullPage: false })
+    console.log('  [ok] mobile.png — single-column mobile layout')
+    results.push({ name: 'mobile', description: 'Single-column mobile layout (390×844)', status: 'ok' })
+    await mobile.close()
+
+    // 8. Huddles — the meeting/scheduling dashboard (/meet/:id renders it).
     await page.goto(`${BASE}/meet/dashboard`, { waitUntil: 'domcontentloaded', timeout: 20_000 })
     await sleep(1_500)
     results.push(await shot(page, 'huddles', 'Huddles — scheduled meeting rooms with join links'))

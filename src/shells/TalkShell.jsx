@@ -13,10 +13,12 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import RequireAuth from './RequireAuth.jsx'
+import { Toaster } from '../lib/toast.jsx'
 
 const SpacesApp = lazy(() => import('../apps/spaces/SpacesApp.jsx'))
 const Room      = lazy(() => import('../apps/spaces/Room.jsx'))
 const Meetings  = lazy(() => import('../apps/spaces/Meetings.jsx'))
+const BotsApp   = lazy(() => import('../apps/bots/BotsApp.jsx'))
 
 function Loading() {
   return (
@@ -37,9 +39,12 @@ export default function TalkShell() {
             <Route path="/dm/:id" element={<SpacesApp />} />
             <Route path="/room/:id" element={<Room />} />
             <Route path="/meet/:id" element={<Meetings />} />
+            <Route path="/apps" element={<BotsApp />} />
+            <Route path="/settings/bots" element={<BotsApp />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+        <Toaster />
       </div>
     </RequireAuth>
   )

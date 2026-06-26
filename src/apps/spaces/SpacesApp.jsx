@@ -1,33 +1,35 @@
 /**
- * SpacesApp — Vulos Spaces surface: channels, DMs, threads.
+ * SpacesApp — Vulos Spaces surface (Slack / Google-Chat-class layout).
  * Routes (mounted by TalkShell): /  /channels/:id  /dm/:id
  *
- * Channel sidebar (public/private channels + DMs) + ChannelView message pane.
- * Backed by the CRDT message store (OFFICE-60); REST/poll presence live via
- * useRestPresence (OFFICE-62 — heartbeat + roster, 15 s interval).
+ *   - Left sidebar: workspace header, prominent Compose, global search/jump,
+ *     collapsible sections (Channels with unread bold + mention badges, Direct
+ *     Messages with presence dots), plus Threads and Activity entries, and an
+ *     Apps & Bots / settings affordance.
+ *   - Center pane: ChannelView, or the Threads / Activity views.
+ *   - Responsive: 3-pane desktop; ≤768px single column with a channel drawer,
+ *     back nav, full-screen composer and a bottom nav.
+ *   - Keyboard: ⌘K quick switcher, ? help overlay, Esc to close.
  *
- * Design pass: rebuilt against `src/components/ui/*` primitives (Sidebar,
- * Input, Modal, Button) and the warm-paper / single-teal-accent tokens —
- * matches the DocsEditor + CommentsPanel revamp.
+ * Backed by the CRDT message store; REST/poll presence via useRestPresence.
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Hash, Lock, AtSign, Plus, Users, Search, ChevronDown, ChevronRight,
+  Pencil, MessageSquare, Bell, Bot, HelpCircle, X, Menu, Home, User,
 } from 'lucide-react'
 import ChannelView from './ChannelView.jsx'
+import ActivityView from './ActivityView.jsx'
+import { QuickSwitcher, ShortcutsHelp } from './Shortcuts.jsx'
 import { api } from '../../lib/api.js'
+import { toast } from '../../lib/toast.jsx'
 import { STATUS_ONLINE } from '@vulos/relay-client/presence'
 import { PresenceDot, StatusPicker } from '../../components/PresenceBar.jsx'
-import { Button, IconButton, Input, Modal, Sidebar, LoadingState } from '../../components/ui'
+import { Button, IconButton, Input, Modal, Sidebar, LoadingState, ThemeSwitch } from '../../components/ui'
 
 // ---------------------------------------------------------------------------
-// useRestPresence — OFFICE-62 REST/poll presence (replaces fabric stub)
-//
-// Polls GET /api/spaces/presence/roster every 15 s.
-// Sends POST /api/spaces/presence/heartbeat every 15 s.
-// Returns { roster, setStatus } where roster has the presencePeer shape:
-//   { accountId, displayName, status, statusText, color, online }
+// useRestPresence (unchanged) — OFFICE-62 REST/poll presence.
 // ---------------------------------------------------------------------------
 
 const PRESENCE_COLORS = [
@@ -38,9 +40,7 @@ const PRESENCE_COLORS = [
 function colorFromUserID(userID) {
   if (!userID) return PRESENCE_COLORS[0]
   let h = 0
-  for (let i = 0; i < userID.length; i++) {
-    h = ((h << 5) - h + userID.charCodeAt(i)) | 0
-  }
+  for (let i = 0; i < userID.length; i++) h = ((h << 5) - h + userID.charCodeAt(i)) | 0
   return PRESENCE_COLORS[Math.abs(h) % PRESENCE_COLORS.length]
 }
 
@@ -49,56 +49,46 @@ function useRestPresence() {
   const statusRef = useRef({ status: 'online', text: '' })
 
   const doHeartbeat = useCallback(async () => {
-    try {
-      await api.spacesHeartbeat(
-        statusRef.current.status,
-        statusRef.current.text,
-        '',
-      )
-    } catch {
-      // network error — silent, will retry
-    }
+    try { await api.spacesHeartbeat(statusRef.current.status, statusRef.current.text, '') } catch {}
   }, [])
 
   const doRoster = useCallback(async () => {
     try {
       const entries = await api.spacesGetRoster()
-      const peers = (entries || []).map((e) => ({
+      setRoster((entries || []).map((e) => ({
         accountId: e.user_id,
         displayName: e.display_name || e.user_id,
         status: e.status || 'online',
         statusText: e.status_text || '',
         color: colorFromUserID(e.user_id),
         online: true,
-      }))
-      setRoster(peers)
-    } catch {
-      // network error — keep existing roster
-    }
+      })))
+    } catch {}
   }, [])
 
   useEffect(() => {
-    // Immediate on mount
-    doHeartbeat()
-    doRoster()
-
-    const hbInterval = setInterval(doHeartbeat, 15000)
-    const rosterInterval = setInterval(doRoster, 15000)
-
-    return () => {
-      clearInterval(hbInterval)
-      clearInterval(rosterInterval)
-    }
+    doHeartbeat(); doRoster()
+    const hb = setInterval(doHeartbeat, 15000)
+    const rs = setInterval(doRoster, 15000)
+    return () => { clearInterval(hb); clearInterval(rs) }
   }, [doHeartbeat, doRoster])
 
   const setStatus = useCallback((status, text = '') => {
     statusRef.current = { status, text }
-    // Send immediately so the change is reflected without waiting for the next tick.
     api.spacesHeartbeat(status, text, '').catch(() => {})
   }, [])
 
   return { roster, setStatus }
 }
+
+// ---------------------------------------------------------------------------
+// Seen-state (best-effort unread tracking via localStorage).
+// ---------------------------------------------------------------------------
+
+const SEEN_KEY = 'spaces_seen'
+function loadSeen() { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') } catch { return {} } }
+function channelActivityTs(ch) { return ch.last_message_at || ch.last_activity || ch.updated_at || null }
+function mentionCount(ch) { return ch.unread_mentions ?? ch.mention_count ?? 0 }
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -124,54 +114,26 @@ function CreateChannelModal({ open, onClose, onCreated }) {
     e.preventDefault()
     const n = name.trim().toLowerCase().replace(/\s+/g, '-')
     if (!n) return
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     try {
       const ch = await api.spacesCreateChannel(n, type)
-      onCreated(ch)
-      onClose()
-    } catch (err) {
-      setError(err.message || 'Create failed')
-    } finally {
-      setLoading(false)
-    }
+      toast.success(`#${n} created`)
+      onCreated(ch); onClose(); setName('')
+    } catch (err) { setError(err.message || 'Create failed') }
+    finally { setLoading(false) }
   }
 
   return (
     <Modal open={open} onClose={onClose} title="Create a channel">
       <form onSubmit={submit}>
         <Modal.Body className="space-y-4">
-          {error && (
-            <p className="text-xs text-danger bg-danger-bg rounded-sm px-3 py-2">{error}</p>
-          )}
-          <Input
-            label="Name"
-            placeholder="e.g. team-design"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            leading={<Hash size={13} />}
-            autoFocus
-          />
+          {error && <p className="text-xs text-danger bg-danger-bg rounded-sm px-3 py-2">{error}</p>}
+          <Input label="Name" placeholder="e.g. team-design" value={name} onChange={(e) => setName(e.target.value)} leading={<Hash size={13} />} autoFocus />
           <div>
-            <label className="block text-xs text-ink-muted font-medium mb-1.5 tracking-tightish">
-              Type
-            </label>
+            <label className="block text-xs text-ink-muted font-medium mb-1.5 tracking-tightish">Type</label>
             <div className="flex gap-2">
-              {[
-                { v: 'public',  label: 'Public',  hint: 'Anyone can join' },
-                { v: 'private', label: 'Private', hint: 'Invite only' },
-              ].map((o) => (
-                <button
-                  key={o.v}
-                  type="button"
-                  onClick={() => setType(o.v)}
-                  className={[
-                    'flex-1 text-left rounded-md border px-3 py-2 transition-colors duration-fast ease-out',
-                    type === o.v
-                      ? 'border-accent bg-accent-tint text-ink'
-                      : 'border-line hover:border-line-strong text-ink-muted',
-                  ].join(' ')}
-                >
+              {[{ v: 'public', label: 'Public', hint: 'Anyone can join' }, { v: 'private', label: 'Private', hint: 'Invite only' }].map((o) => (
+                <button key={o.v} type="button" onClick={() => setType(o.v)} className={['flex-1 text-left rounded-md border px-3 py-2 transition-colors duration-fast ease-out', type === o.v ? 'border-accent bg-accent-tint text-ink' : 'border-line hover:border-line-strong text-ink-muted'].join(' ')}>
                   <div className="text-sm font-medium tracking-tightish">{o.label}</div>
                   <div className="text-2xs text-ink-faint">{o.hint}</div>
                 </button>
@@ -181,9 +143,7 @@ function CreateChannelModal({ open, onClose, onCreated }) {
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose} type="button">Cancel</Button>
-          <Button variant="primary" type="submit" disabled={loading || !name.trim()}>
-            {loading ? 'Creating…' : 'Create channel'}
-          </Button>
+          <Button variant="primary" type="submit" disabled={loading || !name.trim()}>{loading ? 'Creating…' : 'Create channel'}</Button>
         </Modal.Footer>
       </form>
     </Modal>
@@ -191,65 +151,96 @@ function CreateChannelModal({ open, onClose, onCreated }) {
 }
 
 // ---------------------------------------------------------------------------
-// NewDMModal
+// NewConversationModal — direct message OR group DM (multiple recipients).
 // ---------------------------------------------------------------------------
 
-function NewDMModal({ open, onClose, onCreated }) {
-  const [recipient, setRecipient] = useState('')
-  // NAME-CAPTURE-01: optionally name the person you're inviting so the roster
-  // shows their name instead of their account id/email. Sent as member_names.
-  const [recipientName, setRecipientName] = useState('')
+function NewConversationModal({ open, onClose, onCreated, roster = [] }) {
+  const [recipients, setRecipients] = useState([]) // [{ id, name }]
+  const [input, setInput] = useState('')
+  const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
+  function reset() { setRecipients([]); setInput(''); setName(''); setError(null) }
+  function handleClose() { reset(); onClose() }
+
+  function addRecipient(id, displayName = '') {
+    const v = id.trim()
+    if (!v || recipients.some((r) => r.id === v)) return
+    setRecipients((r) => [...r, { id: v, name: displayName.trim() }])
+    setInput(''); setName('')
+  }
+  function removeRecipient(id) { setRecipients((r) => r.filter((x) => x.id !== id)) }
+
   async function submit(e) {
     e.preventDefault()
-    const r = recipient.trim()
-    if (!r) return
-    setLoading(true)
-    setError(null)
+    const all = input.trim() ? [...recipients, { id: input.trim(), name: name.trim() }] : recipients
+    const ids = [...new Set(all.map((r) => r.id).filter(Boolean))]
+    if (ids.length === 0) return
+    setLoading(true); setError(null)
     try {
-      const dmName = ['me', r].sort().join('-')
-      const memberNames = recipientName.trim() ? { [r]: recipientName.trim() } : null
-      const ch = await api.spacesCreateChannel(dmName, 'dm', ['me', r], memberNames)
-      onCreated(ch)
-      setRecipient('')
-      setRecipientName('')
-      onClose()
-    } catch (err) {
-      setError(err.message || 'Create failed')
-    } finally {
-      setLoading(false)
-    }
+      const members = ['me', ...ids]
+      const dmName = members.slice().sort().join('-')
+      const memberNames = all.reduce((acc, r) => { if (r.name) acc[r.id] = r.name; return acc }, {})
+      const ch = await api.spacesCreateChannel(dmName, 'dm', members, Object.keys(memberNames).length ? memberNames : null)
+      toast.success(ids.length > 1 ? 'Group DM opened' : 'Direct message opened')
+      onCreated(ch); handleClose()
+    } catch (err) { setError(err.message || 'Create failed') }
+    finally { setLoading(false) }
   }
 
+  const suggestions = input.trim()
+    ? roster.filter((p) => !recipients.some((r) => r.id === p.accountId) && p.accountId !== 'me' &&
+        (p.accountId.toLowerCase().includes(input.toLowerCase()) || p.displayName?.toLowerCase().includes(input.toLowerCase()))).slice(0, 5)
+    : []
+
+  const isGroup = recipients.length + (input.trim() ? 1 : 0) > 1
+
   return (
-    <Modal open={open} onClose={onClose} title="New direct message">
+    <Modal open={open} onClose={handleClose} title={isGroup ? 'New group message' : 'New message'}>
       <form onSubmit={submit}>
         <Modal.Body className="space-y-4">
-          {error && (
-            <p className="text-xs text-danger bg-danger-bg rounded-sm px-3 py-2">{error}</p>
+          {error && <p className="text-xs text-danger bg-danger-bg rounded-sm px-3 py-2">{error}</p>}
+          {recipients.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {recipients.map((r) => (
+                <span key={r.id} className="inline-flex items-center gap-1 bg-accent-tint border border-accent-tint-2 rounded-pill pl-2 pr-1 py-0.5 text-xs text-ink">
+                  {r.name || r.id}
+                  <button type="button" onClick={() => removeRecipient(r.id)} className="text-ink-faint hover:text-ink" aria-label={`Remove ${r.id}`}><X size={11} /></button>
+                </span>
+              ))}
+            </div>
           )}
-          <Input
-            label="To"
-            placeholder="account id, e.g. alice"
-            value={recipient}
-            onChange={(e) => setRecipient(e.target.value)}
-            leading={<AtSign size={13} />}
-            autoFocus
-          />
-          <Input
-            label="Their name (optional)"
-            placeholder="e.g. Jane Doe"
-            value={recipientName}
-            onChange={(e) => setRecipientName(e.target.value)}
-            leading={<Users size={13} />}
-          />
+          <div>
+            <Input
+              label="To"
+              placeholder="account id — add several for a group"
+              value={input}
+              onChange={(e) => { setInput(e.target.value); setError(null) }}
+              onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ',') && input.trim()) { e.preventDefault(); addRecipient(input, name) } }}
+              leading={<AtSign size={13} />}
+              autoFocus
+            />
+            {suggestions.length > 0 && (
+              <ul role="listbox" className="mt-1 border border-line rounded-md bg-paper shadow-e2 overflow-hidden">
+                {suggestions.map((p) => (
+                  <li key={p.accountId}>
+                    <button type="button" onClick={() => addRecipient(p.accountId, p.displayName)} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-accent-tint transition-colors">
+                      <PresenceDot status={p.status} size={7} />
+                      <span className="font-medium text-ink tracking-tightish">{p.displayName || p.accountId}</span>
+                      {p.displayName && <span className="text-ink-faint text-2xs ml-auto">{p.accountId}</span>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <Input label="Their name (optional)" placeholder="e.g. Jane Doe" value={name} onChange={(e) => setName(e.target.value)} leading={<Users size={13} />} />
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={onClose} type="button">Cancel</Button>
-          <Button variant="primary" type="submit" disabled={loading || !recipient.trim()}>
-            {loading ? 'Opening…' : 'Open DM'}
+          <Button variant="secondary" onClick={handleClose} type="button">Cancel</Button>
+          <Button variant="primary" type="submit" disabled={loading || (recipients.length === 0 && !input.trim())}>
+            {loading ? 'Opening…' : isGroup ? 'Start group' : 'Open DM'}
           </Button>
         </Modal.Footer>
       </form>
@@ -258,12 +249,9 @@ function NewDMModal({ open, onClose, onCreated }) {
 }
 
 // ---------------------------------------------------------------------------
-// DisplayNameModal — "your display name" profile control
+// DisplayNameModal
 // ---------------------------------------------------------------------------
 
-// NAME-CAPTURE-01: lets the signed-in member set their own display name in the
-// active channel on first join. Calls PUT /spaces/channels/:id/members/me/name
-// which routes through the office-local SetDisplayName seam.
 function DisplayNameModal({ open, onClose, channelId, onSaved }) {
   const [displayName, setDisplayName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -272,44 +260,23 @@ function DisplayNameModal({ open, onClose, channelId, onSaved }) {
   async function submit(e) {
     e.preventDefault()
     if (!channelId) return
-    setLoading(true)
-    setError(null)
-    try {
-      await api.spacesSetMyName(channelId, displayName.trim())
-      if (onSaved) onSaved()
-      onClose()
-    } catch (err) {
-      setError(err.message || 'Save failed')
-    } finally {
-      setLoading(false)
-    }
+    setLoading(true); setError(null)
+    try { await api.spacesSetMyName(channelId, displayName.trim()); onSaved?.(); onClose() }
+    catch (err) { setError(err.message || 'Save failed') }
+    finally { setLoading(false) }
   }
 
   return (
     <Modal open={open} onClose={onClose} title="Your display name">
       <form onSubmit={submit}>
         <Modal.Body className="space-y-4">
-          {error && (
-            <p className="text-xs text-danger bg-danger-bg rounded-sm px-3 py-2">{error}</p>
-          )}
-          <p className="text-2xs text-ink-faint">
-            How you appear to others in this channel. Leave blank to show your
-            account id.
-          </p>
-          <Input
-            label="Display name"
-            placeholder="e.g. Jane Doe"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            leading={<Users size={13} />}
-            autoFocus
-          />
+          {error && <p className="text-xs text-danger bg-danger-bg rounded-sm px-3 py-2">{error}</p>}
+          <p className="text-2xs text-ink-faint">How you appear to others in this channel. Leave blank to show your account id.</p>
+          <Input label="Display name" placeholder="e.g. Jane Doe" value={displayName} onChange={(e) => setDisplayName(e.target.value)} leading={<Users size={13} />} autoFocus />
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onClose} type="button">Cancel</Button>
-          <Button variant="primary" type="submit" disabled={loading || !channelId}>
-            {loading ? 'Saving…' : 'Save name'}
-          </Button>
+          <Button variant="primary" type="submit" disabled={loading || !channelId}>{loading ? 'Saving…' : 'Save name'}</Button>
         </Modal.Footer>
       </form>
     </Modal>
@@ -317,219 +284,182 @@ function DisplayNameModal({ open, onClose, channelId, onSaved }) {
 }
 
 // ---------------------------------------------------------------------------
-// Sidebar
+// SectionToggle + ChannelRow
+// ---------------------------------------------------------------------------
+
+function SectionToggle({ label, open, onToggle, onAdd, addTitle }) {
+  return (
+    <div className="flex items-center justify-between pl-2 pr-1 pt-1 pb-1 group">
+      <button onClick={onToggle} className="flex items-center gap-1 text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow hover:text-ink-muted transition-colors">
+        {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        {label}
+      </button>
+      {onAdd && (
+        <button onClick={onAdd} title={addTitle} aria-label={addTitle} className="opacity-0 group-hover:opacity-100 rounded-xs p-0.5 text-ink-faint hover:text-ink hover:bg-accent-tint transition-[opacity,background,color] duration-fast">
+          <Plus size={12} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+function ChannelRow({ channel, isActive, unread, mentions, dmPeer, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(channel)}
+      aria-current={isActive ? 'true' : undefined}
+      className={[
+        'relative w-full flex items-center gap-2 h-7 pl-3 pr-2 rounded-md text-left transition-colors duration-fast ease-out',
+        isActive ? 'bg-paper text-ink shadow-e1' : unread ? 'text-ink hover:bg-accent-tint' : 'text-ink-muted hover:bg-accent-tint hover:text-ink',
+      ].join(' ')}
+    >
+      <span aria-hidden className={['absolute left-0 top-1 bottom-1 w-[2px] rounded-r-full', isActive ? 'bg-accent' : 'bg-transparent'].join(' ')} />
+      <span className="relative flex-shrink-0">
+        <ChannelIcon type={channel.type} />
+        {dmPeer && <span className="absolute -bottom-0.5 -right-0.5"><PresenceDot status={dmPeer.status} size={6} /></span>}
+      </span>
+      <span className={['truncate text-sm tracking-tightish flex-1', unread && !isActive ? 'font-semibold' : ''].join(' ')}>{channel.name}</span>
+      {mentions > 0 && (
+        <span className="flex-shrink-0 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-pill bg-danger text-white text-[10px] font-bold tabular-nums">{mentions > 99 ? '99+' : mentions}</span>
+      )}
+      {unread && mentions === 0 && !isActive && <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-accent-press" />}
+    </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// SpacesSidebar
 // ---------------------------------------------------------------------------
 
 function SpacesSidebar({
-  channels, activeId, onSelect, onRefresh,
-  roster, localStatus, localStatusText, onSetStatus,
+  channels, activeId, view, onSelect, onSetView, onRefresh, seenMap,
+  roster, localStatus, localStatusText, onSetStatus, onOpenQuick, onOpenHelp,
 }) {
+  const navigate = useNavigate()
   const [showCreateChannel, setShowCreateChannel] = useState(false)
-  const [showNewDM, setShowNewDM] = useState(false)
+  const [showNewConvo, setShowNewConvo] = useState(false)
   const [showDisplayName, setShowDisplayName] = useState(false)
+  const [showCompose, setShowCompose] = useState(false)
   const [channelsOpen, setChannelsOpen] = useState(true)
   const [dmsOpen, setDmsOpen] = useState(true)
-  const [search, setSearch] = useState('')
   const [showStatusPicker, setShowStatusPicker] = useState(false)
 
   const publicChannels = channels.filter((c) => c.type !== 'dm')
   const dms = channels.filter((c) => c.type === 'dm')
 
-  const filtered = (list) =>
-    search ? list.filter((c) => c.name.toLowerCase().includes(search.toLowerCase())) : list
-
-  function SectionToggle({ label, open, onToggle, onAdd, addTitle }) {
-    return (
-      <div className="flex items-center justify-between pl-2 pr-1 pt-1 pb-1 group">
-        <button
-          onClick={onToggle}
-          className="flex items-center gap-1 text-2xs font-semibold text-ink-faint uppercase tracking-eyebrow hover:text-ink-muted transition-colors"
-        >
-          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-          {label}
-        </button>
-        <button
-          onClick={onAdd}
-          title={addTitle}
-          aria-label={addTitle}
-          className="opacity-0 group-hover:opacity-100 rounded-xs p-0.5 text-ink-faint hover:text-ink hover:bg-accent-tint transition-[opacity,background,color] duration-fast"
-        >
-          <Plus size={12} />
-        </button>
-      </div>
-    )
-  }
-
-  function ChannelRow({ channel }) {
-    const isActive = channel.id === activeId
-    const dmPeer = channel.type === 'dm'
-      ? roster.find((p) => !p.isSelf && channel.name.includes(p.displayName || p.accountId))
-      : null
-    return (
-      <button
-        type="button"
-        onClick={() => onSelect(channel)}
-        className={[
-          'relative flex items-center gap-2 h-7 pl-3 pr-2 rounded-md text-left',
-          'transition-colors duration-fast ease-out',
-          isActive
-            ? 'bg-paper text-ink shadow-e1'
-            : 'text-ink-muted hover:bg-accent-tint hover:text-ink',
-        ].join(' ')}
-      >
-        <span
-          aria-hidden
-          className={[
-            'absolute left-0 top-1 bottom-1 w-[2px] rounded-r-full',
-            isActive ? 'bg-accent' : 'bg-transparent',
-          ].join(' ')}
-        />
-        <span className="relative flex-shrink-0">
-          <ChannelIcon type={channel.type} />
-          {dmPeer && (
-            <span className="absolute -bottom-0.5 -right-0.5">
-              <PresenceDot status={dmPeer.status} size={6} />
-            </span>
-          )}
-        </span>
-        <span className="truncate text-sm tracking-tightish">{channel.name}</span>
-      </button>
-    )
+  function isUnread(ch) {
+    if (ch.id === activeId) return false
+    const ts = channelActivityTs(ch)
+    if (!ts) return false
+    const seen = seenMap[ch.id]
+    return !seen || new Date(ts) > new Date(seen)
   }
 
   const peersOnline = roster.filter((p) => !p.isSelf)
 
   return (
-    <Sidebar collapsed={false} className="w-60">
-      {/* Search */}
-      <div className="px-2 pt-3 pb-2 border-b border-line">
-        <Input
-          size="sm"
-          placeholder="Find channel…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          leading={<Search size={12} />}
-        />
+    <Sidebar collapsed={false} className="w-60 h-full">
+      {/* Workspace header */}
+      <div className="flex items-center justify-between h-12 px-3 border-b border-line flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-6 h-6 rounded-md bg-accent text-white flex items-center justify-center text-xs font-semibold flex-shrink-0">V</div>
+          <span className="text-sm font-semibold text-ink tracking-tightish truncate">Vulos Talk</span>
+        </div>
+        <IconButton size="sm" title="Apps & Bots" aria-label="Apps & Bots" onClick={() => navigate('/apps')}>
+          <Bot size={15} />
+        </IconButton>
       </div>
 
-      {/* Channel list */}
+      {/* Compose + search */}
+      <div className="px-2 pt-2.5 pb-2 space-y-1.5 border-b border-line flex-shrink-0">
+        <div className="relative">
+          <Button variant="primary" fullWidth size="sm" onClick={() => setShowCompose((v) => !v)}>
+            <Pencil size={13} /> New message
+          </Button>
+          {showCompose && (
+            <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-paper border border-line rounded-md shadow-e3 py-1 animate-scale-in" onMouseLeave={() => setShowCompose(false)}>
+              <button type="button" onClick={() => { setShowCompose(false); setShowNewConvo(true) }} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-ink-muted hover:bg-accent-tint hover:text-ink transition-colors text-left">
+                <AtSign size={13} /> Message someone
+              </button>
+              <button type="button" onClick={() => { setShowCompose(false); setShowCreateChannel(true) }} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-ink-muted hover:bg-accent-tint hover:text-ink transition-colors text-left">
+                <Hash size={13} /> Create channel
+              </button>
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onOpenQuick}
+          className="w-full flex items-center gap-2 h-8 px-2.5 rounded-md bg-bg-sunk border border-line text-ink-faint hover:text-ink-muted hover:border-line-strong transition-colors text-left"
+        >
+          <Search size={13} className="flex-shrink-0" />
+          <span className="text-xs tracking-tightish flex-1">Jump to…</span>
+          <kbd className="text-[10px] font-mono border border-line rounded-xs px-1 py-px">⌘K</kbd>
+        </button>
+      </div>
+
+      {/* Nav list */}
       <div className="flex-1 overflow-y-auto py-2 px-1.5 space-y-0.5">
-        <SectionToggle
-          label="Channels"
-          open={channelsOpen}
-          onToggle={() => setChannelsOpen(!channelsOpen)}
-          onAdd={() => setShowCreateChannel(true)}
-          addTitle="Create channel"
-        />
-        {channelsOpen && filtered(publicChannels).map((ch) => (
-          <ChannelRow key={ch.id} channel={ch} />
+        {/* Threads + Activity entries */}
+        <button type="button" onClick={() => onSetView('threads')} className={['w-full flex items-center gap-2 h-7 pl-3 pr-2 rounded-md text-left transition-colors duration-fast', view === 'threads' ? 'bg-paper text-ink shadow-e1' : 'text-ink-muted hover:bg-accent-tint hover:text-ink'].join(' ')}>
+          <MessageSquare size={14} className="text-ink-faint" /><span className="text-sm tracking-tightish">Threads</span>
+        </button>
+        <button type="button" onClick={() => onSetView('activity')} className={['w-full flex items-center gap-2 h-7 pl-3 pr-2 rounded-md text-left transition-colors duration-fast', view === 'activity' ? 'bg-paper text-ink shadow-e1' : 'text-ink-muted hover:bg-accent-tint hover:text-ink'].join(' ')}>
+          <Bell size={14} className="text-ink-faint" /><span className="text-sm tracking-tightish">Activity</span>
+        </button>
+
+        <div className="mt-2" />
+        <SectionToggle label="Channels" open={channelsOpen} onToggle={() => setChannelsOpen(!channelsOpen)} onAdd={() => setShowCreateChannel(true)} addTitle="Create channel" />
+        {channelsOpen && publicChannels.map((ch) => (
+          <ChannelRow key={ch.id} channel={ch} isActive={ch.id === activeId && view === 'chat'} unread={isUnread(ch)} mentions={mentionCount(ch)} onSelect={onSelect} />
         ))}
+        {channelsOpen && publicChannels.length === 0 && <p className="text-2xs text-ink-faint px-3 py-1 italic">No channels yet.</p>}
 
         <div className="mt-3" />
-        <SectionToggle
-          label="Direct Messages"
-          open={dmsOpen}
-          onToggle={() => setDmsOpen(!dmsOpen)}
-          onAdd={() => setShowNewDM(true)}
-          addTitle="New direct message"
-        />
-        {dmsOpen && filtered(dms).map((ch) => (
-          <ChannelRow key={ch.id} channel={ch} />
-        ))}
-
-        {filtered(publicChannels).length === 0 &&
-          filtered(dms).length === 0 &&
-          search && (
-            <p className="text-2xs text-ink-faint px-3 py-2 font-serif italic">
-              No channels found.
-            </p>
-        )}
+        <SectionToggle label="Direct Messages" open={dmsOpen} onToggle={() => setDmsOpen(!dmsOpen)} onAdd={() => setShowNewConvo(true)} addTitle="New message" />
+        {dmsOpen && dms.map((ch) => {
+          const dmPeer = roster.find((p) => !p.isSelf && ch.name.includes(p.displayName || p.accountId))
+          return <ChannelRow key={ch.id} channel={ch} isActive={ch.id === activeId && view === 'chat'} unread={isUnread(ch)} mentions={mentionCount(ch)} dmPeer={dmPeer} onSelect={onSelect} />
+        })}
+        {dmsOpen && dms.length === 0 && <p className="text-2xs text-ink-faint px-3 py-1 italic">No direct messages.</p>}
       </div>
 
-      {/* Presence footer */}
+      {/* Footer */}
       <Sidebar.Footer>
         {peersOnline.length > 0 && (
           <div className="flex items-center gap-1.5 px-2 py-1 text-2xs text-ink-faint">
             <Users size={11} />
-            <span className="font-medium text-ink-muted">
-              {peersOnline.length} online
-            </span>
-            <div className="flex flex-wrap gap-1 ml-1">
-              {peersOnline.slice(0, 5).map((p) => (
-                <span
-                  key={p.accountId}
-                  className="flex items-center gap-1 bg-bg-elev2 border border-line rounded-pill px-1.5 py-0.5 text-ink-muted"
-                  title={p.statusText ? `${p.displayName} — ${p.statusText}` : p.displayName}
-                >
-                  <PresenceDot status={p.status} size={6} />
-                  <span className="truncate max-w-[60px]">{p.displayName}</span>
-                </span>
-              ))}
-            </div>
+            <span className="font-medium text-ink-muted">{peersOnline.length} online</span>
           </div>
         )}
-
         <div className="relative">
-          <button
-            type="button"
-            onClick={() => setShowStatusPicker((v) => !v)}
-            className="w-full flex items-center gap-2 h-8 px-3 rounded-md text-ink-muted hover:bg-accent-tint hover:text-ink transition-colors duration-fast ease-out"
-          >
+          <button type="button" onClick={() => setShowStatusPicker((v) => !v)} className="w-full flex items-center gap-2 h-8 px-3 rounded-md text-ink-muted hover:bg-accent-tint hover:text-ink transition-colors duration-fast ease-out">
             <PresenceDot status={localStatus} size={8} />
-            <span className="text-xs truncate tracking-tightish">
-              {localStatusText || localStatus || STATUS_ONLINE}
-            </span>
+            <span className="text-xs truncate tracking-tightish">{localStatusText || localStatus || STATUS_ONLINE}</span>
           </button>
-          {showStatusPicker && (
-            <StatusPicker
-              currentStatus={localStatus}
-              currentText={localStatusText}
-              onStatusChange={onSetStatus}
-              onClose={() => setShowStatusPicker(false)}
-            />
-          )}
+          {showStatusPicker && <StatusPicker currentStatus={localStatus} currentText={localStatusText} onStatusChange={onSetStatus} onClose={() => setShowStatusPicker(false)} />}
         </div>
-
-        {/* NAME-CAPTURE-01: set your own display name in the active channel. */}
-        <button
-          type="button"
-          onClick={() => setShowDisplayName(true)}
-          disabled={!activeId}
-          title={activeId ? 'Set your display name' : 'Open a channel first'}
-          className="w-full flex items-center gap-2 h-8 px-3 rounded-md text-ink-muted hover:bg-accent-tint hover:text-ink transition-colors duration-fast ease-out disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <Users size={12} />
-          <span className="text-xs truncate tracking-tightish">Set your name</span>
+        <button type="button" onClick={() => setShowDisplayName(true)} disabled={!activeId} title={activeId ? 'Set your display name' : 'Open a channel first'} className="w-full flex items-center gap-2 h-8 px-3 rounded-md text-ink-muted hover:bg-accent-tint hover:text-ink transition-colors duration-fast ease-out disabled:opacity-40 disabled:cursor-not-allowed">
+          <User size={13} /><span className="text-xs truncate tracking-tightish">Set your name</span>
         </button>
+        <button type="button" onClick={onOpenHelp} className="w-full flex items-center gap-2 h-8 px-3 rounded-md text-ink-muted hover:bg-accent-tint hover:text-ink transition-colors duration-fast ease-out">
+          <HelpCircle size={13} /><span className="text-xs truncate tracking-tightish">Keyboard shortcuts</span>
+        </button>
+        <div className="px-2 pt-1"><ThemeSwitch /></div>
       </Sidebar.Footer>
 
-      <CreateChannelModal
-        open={showCreateChannel}
-        onClose={() => setShowCreateChannel(false)}
-        onCreated={(ch) => { onRefresh(); onSelect(ch) }}
-      />
-      <NewDMModal
-        open={showNewDM}
-        onClose={() => setShowNewDM(false)}
-        onCreated={(ch) => { onRefresh(); onSelect(ch) }}
-      />
-      <DisplayNameModal
-        open={showDisplayName}
-        onClose={() => setShowDisplayName(false)}
-        channelId={activeId}
-        onSaved={onRefresh}
-      />
+      <CreateChannelModal open={showCreateChannel} onClose={() => setShowCreateChannel(false)} onCreated={(ch) => { onRefresh(); onSelect(ch) }} />
+      <NewConversationModal open={showNewConvo} onClose={() => setShowNewConvo(false)} onCreated={(ch) => { onRefresh(); onSelect(ch) }} roster={roster} />
+      <DisplayNameModal open={showDisplayName} onClose={() => setShowDisplayName(false)} channelId={activeId} onSaved={onRefresh} />
     </Sidebar>
   )
 }
 
 // ---------------------------------------------------------------------------
-// SpacesApp — root component
+// SpacesApp — root
 // ---------------------------------------------------------------------------
 
-// Route helper: TalkShell mounts SpacesApp at /channels/:id and /dm/:id, so the
-// path param is `id` and channels/DMs live under different prefixes. Keep this in
-// sync with the routes declared in src/shells/TalkShell.jsx.
 function channelPath(ch) {
   return `${ch.type === 'dm' ? '/dm' : '/channels'}/${ch.id}`
 }
@@ -539,18 +469,20 @@ export default function SpacesApp() {
   const navigate = useNavigate()
   const [channels, setChannels] = useState([])
   const [activeChannel, setActiveChannel] = useState(null)
+  const [view, setView] = useState('chat') // 'chat' | 'threads' | 'activity'
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [seenMap, setSeenMap] = useState(loadSeen)
+  const [mobilePane, setMobilePane] = useState('list') // 'list' | 'main'
+  const [quickOpen, setQuickOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
 
-  // OFFICE-62: REST/poll presence (replaced fabric-null stub).
   const { roster, setStatus: setRestStatus } = useRestPresence()
   const [localStatus, setLocalStatus] = useState(STATUS_ONLINE)
   const [localStatusText, setLocalStatusText] = useState('')
 
   function handleSetStatus(status, text) {
-    setLocalStatus(status)
-    setLocalStatusText(text)
-    setRestStatus(status, text)
+    setLocalStatus(status); setLocalStatusText(text); setRestStatus(status, text)
   }
 
   const currentUser = 'me'
@@ -560,66 +492,105 @@ export default function SpacesApp() {
       const chs = await api.spacesListChannels()
       setChannels(chs || [])
       return chs || []
-    } catch (e) {
-      setError(e.message || 'Failed to load channels')
-      return []
-    } finally {
-      setLoading(false)
-    }
+    } catch (e) { setError(e.message || 'Failed to load channels'); return [] }
+    finally { setLoading(false) }
   }, [])
 
   useEffect(() => {
     loadChannels().then((chs) => {
       if (channelId) {
         const found = chs.find((c) => c.id === channelId)
-        if (found) setActiveChannel(found)
+        if (found) { setActiveChannel(found); setMobilePane('main') }
       } else if (chs.length > 0) {
-        // Show the first channel on the bare route without rewriting the URL —
-        // navigating here would remount this component and loop. The URL only
-        // changes on an explicit user selection (selectChannel).
         setActiveChannel(chs[0])
       }
     })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  function markSeen(ch) {
+    setSeenMap((prev) => {
+      const next = { ...prev, [ch.id]: new Date().toISOString() }
+      try { localStorage.setItem(SEEN_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
+
   function selectChannel(ch) {
-    setActiveChannel(ch)
+    setActiveChannel(ch); setView('chat'); setMobilePane('main'); markSeen(ch)
     navigate(channelPath(ch))
   }
 
+  // Global keyboard shortcuts
+  useEffect(() => {
+    function onKey(e) {
+      const mod = e.metaKey || e.ctrlKey
+      if (mod && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); setQuickOpen(true); return }
+      const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable
+      if (!typing && e.key === '?') { e.preventDefault(); setHelpOpen(true) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   if (loading) {
+    return <div className="flex-1 flex items-center justify-center bg-bg"><LoadingState label="Loading Spaces…" /></div>
+  }
+  if (error) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-bg">
-        <LoadingState label="Loading Spaces…" />
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 text-sm bg-bg">
+        <p className="text-danger">{error}</p>
+        <Button variant="secondary" size="sm" onClick={() => { setError(null); setLoading(true); loadChannels() }}>Retry</Button>
       </div>
     )
   }
 
-  if (error) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-danger text-sm bg-bg">
-        {error}
-      </div>
-    )
-  }
+  const mainPane = view === 'chat'
+    ? <ChannelView channel={activeChannel} currentUser={currentUser} roster={roster} onStatusChange={handleSetStatus} onMobileBack={() => setMobilePane('list')} />
+    : <ActivityView mode={view} channels={channels} currentUser={currentUser} onOpenChannel={selectChannel} />
 
   return (
     <div className="flex flex-1 min-h-0 bg-bg">
-      <SpacesSidebar
-        channels={channels}
-        activeId={activeChannel?.id}
-        onSelect={selectChannel}
-        onRefresh={loadChannels}
-        roster={roster}
-        localStatus={localStatus}
-        localStatusText={localStatusText}
-        onSetStatus={handleSetStatus}
-      />
-      <ChannelView
-        channel={activeChannel}
-        currentUser={currentUser}
-        roster={roster}
-      />
+      {/* Sidebar — drawer on mobile */}
+      <div className={['md:flex md:w-auto', mobilePane === 'list' ? 'flex w-full' : 'hidden'].join(' ')}>
+        <SpacesSidebar
+          channels={channels}
+          activeId={activeChannel?.id}
+          view={view}
+          onSelect={selectChannel}
+          onSetView={(v) => { setView(v); setMobilePane('main') }}
+          onRefresh={loadChannels}
+          seenMap={seenMap}
+          roster={roster}
+          localStatus={localStatus}
+          localStatusText={localStatusText}
+          onSetStatus={handleSetStatus}
+          onOpenQuick={() => setQuickOpen(true)}
+          onOpenHelp={() => setHelpOpen(true)}
+        />
+      </div>
+
+      {/* Main pane */}
+      <div className={['flex-1 min-h-0 flex-col', mobilePane === 'main' ? 'flex' : 'hidden md:flex'].join(' ')}>
+        {mainPane}
+      </div>
+
+      {/* Mobile bottom nav */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-paper border-t border-line flex items-stretch h-14" aria-label="Primary">
+        {[
+          { key: 'list', label: 'Channels', Icon: Home, onClick: () => setMobilePane('list') },
+          { key: 'dms', label: 'DMs', Icon: AtSign, onClick: () => { setMobilePane('list') } },
+          { key: 'activity', label: 'Activity', Icon: Bell, onClick: () => { setView('activity'); setMobilePane('main') } },
+          { key: 'you', label: 'You', Icon: User, onClick: () => setMobilePane('list') },
+        ].map(({ key, label, Icon, onClick }) => (
+          <button key={key} type="button" onClick={onClick} className="flex-1 flex flex-col items-center justify-center gap-0.5 text-ink-faint hover:text-ink active:bg-accent-tint transition-colors min-w-[44px]">
+            <Icon size={18} />
+            <span className="text-[10px] tracking-tightish">{label}</span>
+          </button>
+        ))}
+      </nav>
+
+      <QuickSwitcher open={quickOpen} channels={channels} onClose={() => setQuickOpen(false)} onSelect={selectChannel} />
+      <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   )
 }

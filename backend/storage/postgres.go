@@ -936,4 +936,3 @@ DELETE FROM suggestions WHERE file_id=$1 AND id=$2`, fileID, suggestionID)
 	}
 	return nil
 }
-

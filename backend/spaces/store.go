@@ -9,9 +9,9 @@
 //
 //   - Append  – insert if ID is unknown to the replica.
 //   - Edit    – replace body when incoming SeqClock > stored SeqClock for
-//               the same message ID.
+//     the same message ID.
 //   - Tombstone – permanently delete; once a message is tombstoned its
-//                 state can never be changed back.
+//     state can never be changed back.
 //
 // ApplyOp / MergeOps implement the merge function.  They are safe to call
 // from multiple goroutines.
@@ -206,9 +206,9 @@ type SpacesStore struct {
 	persist Persister
 
 	// in-memory indexes (rebuilt from Persister on Open)
-	channels map[string]*models.Channel             // channelID → Channel
+	channels map[string]*models.Channel               // channelID → Channel
 	members  map[string]map[string]*models.Membership // channelID → accountID → Membership
-	messages map[string]map[string]*models.Message  // channelID → msgID → Message
+	messages map[string]map[string]*models.Message    // channelID → msgID → Message
 }
 
 // Open creates a SpacesStore, loads state from the Persister, and is ready to use.
@@ -723,10 +723,10 @@ func (s *SpacesStore) applyToIndex(op *models.MessageOp) error {
 
 func (s *SpacesStore) MarkRead(accountID, channelID, clock string) error {
 	rs := &models.ReadState{
-		AccountID:    accountID,
-		ChannelID:    channelID,
+		AccountID:     accountID,
+		ChannelID:     channelID,
 		LastReadClock: clock,
-		UpdatedAt:    time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 	return s.persist.SaveReadState(rs)
 }
@@ -742,15 +742,15 @@ func (s *SpacesStore) GetReadState(accountID, channelID string) (*models.ReadSta
 // NullPersister is a Persister that stores everything in memory.
 // It satisfies the interface without any disk or DB dependency.
 type NullPersister struct {
-	mu         sync.Mutex
-	channels   map[string]*models.Channel
+	mu          sync.Mutex
+	channels    map[string]*models.Channel
 	memberships map[string][]*models.Membership
-	messages   map[string]map[string]*models.Message // channelID → msgID → msg
-	ops        map[string][]*models.MessageOp        // channelID → ops
-	readStates map[string]*models.ReadState          // "accountID:channelID" → rs
-	statuses   map[string]*models.UserStatus         // userID → status
-	reactions  map[string]*models.Reaction           // "msgID|emoji|userID" → reaction
-	pins       map[string]*models.PinnedMessage      // "channelID|msgID" → pin
+	messages    map[string]map[string]*models.Message // channelID → msgID → msg
+	ops         map[string][]*models.MessageOp        // channelID → ops
+	readStates  map[string]*models.ReadState          // "accountID:channelID" → rs
+	statuses    map[string]*models.UserStatus         // userID → status
+	reactions   map[string]*models.Reaction           // "msgID|emoji|userID" → reaction
+	pins        map[string]*models.PinnedMessage      // "channelID|msgID" → pin
 }
 
 func NewNullPersister() *NullPersister {

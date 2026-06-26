@@ -27,9 +27,9 @@ import (
 // ── constants ────────────────────────────────────────────────────────────────
 
 const (
-	TokenTTL     = time.Hour        // join token validity window
-	RoomIDLen    = 16               // bytes → 22 URL-safe base64 chars
-	MaxRoomPeers = 25               // default cap; configurable up to 100
+	TokenTTL     = time.Hour // join token validity window
+	RoomIDLen    = 16        // bytes → 22 URL-safe base64 chars
+	MaxRoomPeers = 25        // default cap; configurable up to 100
 )
 
 // ── token payload ─────────────────────────────────────────────────────────────
@@ -51,8 +51,8 @@ type nonceKey struct {
 }
 
 type nonceStore struct {
-	mu      sync.Mutex
-	used    map[nonceKey]int64 // nonceKey → expires_at unix
+	mu   sync.Mutex
+	used map[nonceKey]int64 // nonceKey → expires_at unix
 }
 
 var globalNonces = &nonceStore{
@@ -95,8 +95,8 @@ func (ns *nonceStore) sweep() {
 
 // ── participant roster (per-room cap) ─────────────────────────────────────────
 type rosterStore struct {
-	mu      sync.Mutex
-	counts  map[string]int // roomID → current participant count
+	mu     sync.Mutex
+	counts map[string]int // roomID → current participant count
 }
 
 var globalRoster = &rosterStore{

@@ -289,4 +289,50 @@ export const api = {
     request(`/contacts/${uid}`, { method: 'PUT', body: JSON.stringify(contact) }),
   deleteContact: (uid) =>
     request(`/contacts/${uid}`, { method: 'DELETE' }),
+
+  // -------------------------------------------------------------------------
+  // TALK-BOTS: Apps & Bots admin API (session-cookie authed; admin scope).
+  //
+  // Contract (backend built in parallel — callers feature-detect 404):
+  //   GET    /api/bots                  → BotSummary[]
+  //   POST   /api/bots {name,scopes,event_url,slash_commands:[{name,description}]}
+  //                                     → {bot, token, signing_secret, incoming_webhook_url}
+  //   GET    /api/bots/:id              → BotSummary
+  //   PUT    /api/bots/:id {…}          → BotSummary
+  //   DELETE /api/bots/:id
+  //   POST   /api/bots/:id/rotate-token  → {token}
+  //   POST   /api/bots/:id/rotate-secret → {signing_secret}
+  //
+  // BotSummary: {id,name,scopes,event_url,slash_commands,owner_id,
+  //              incoming_webhook_id,incoming_webhook_url,created_at}
+  // -------------------------------------------------------------------------
+  botsList: () => request('/bots'),
+  botGet: (id) => request(`/bots/${id}`),
+  botCreate: ({ name, scopes = [], eventUrl = '', slashCommands = [] }) =>
+    request('/bots', {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        scopes,
+        event_url: eventUrl,
+        slash_commands: slashCommands,
+      }),
+    }),
+  botUpdate: (id, { name, scopes, eventUrl, slashCommands }) =>
+    request(`/bots/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        ...(name !== undefined ? { name } : {}),
+        ...(scopes !== undefined ? { scopes } : {}),
+        ...(eventUrl !== undefined ? { event_url: eventUrl } : {}),
+        ...(slashCommands !== undefined ? { slash_commands: slashCommands } : {}),
+      }),
+    }),
+  botDelete: (id) => request(`/bots/${id}`, { method: 'DELETE' }),
+  botRotateToken: (id) => request(`/bots/${id}/rotate-token`, { method: 'POST', body: '{}' }),
+  botRotateSecret: (id) => request(`/bots/${id}/rotate-secret`, { method: 'POST', body: '{}' }),
+
+  // Slash commands surfaced to the composer autocomplete.
+  //   GET /api/spaces/commands → [{name, description, bot_id}]
+  spacesListCommands: () => request('/spaces/commands'),
 }

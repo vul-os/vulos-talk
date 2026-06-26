@@ -214,6 +214,21 @@ export async function seedViaAPI(baseURL = BASE_URL, secret = DEMO_SECRET) {
   ]
   for (const h of huddles) await tryPost(baseURL, '/meetings', h, tok.you)
 
+  // ── A bot/app with slash commands (Apps & Bots + composer slash autocomplete) ──
+  // Created as `you` so it shows in the owner-scoped Apps & Bots admin view. The
+  // registered slash commands feed the composer's /-autocomplete via
+  // GET /api/spaces/commands. (No live bot server is needed for the demo.)
+  await tryPost(baseURL, '/bots', {
+    name: 'standup-bot',
+    scopes: ['chat:write', 'history:read', 'channels:read', 'reactions:write'],
+    event_url: 'https://example.com/vulos/events',
+    slash_commands: [
+      { name: 'standup', description: 'Post today’s standup prompt to the channel' },
+      { name: 'echo', description: 'Echo back the text you send' },
+      { name: 'giphy', description: 'Search for a GIF by keyword' },
+    ],
+  }, tok.you)
+
   console.log('  API seed complete')
 }
 

@@ -23,7 +23,7 @@ type File struct {
 type FileVersion struct {
 	ID        string      `json:"id"`
 	FileID    string      `json:"file_id"`
-	Name      string      `json:"name"`      // file name at snapshot time
+	Name      string      `json:"name"`            // file name at snapshot time
 	Label     string      `json:"label,omitempty"` // optional user-defined label e.g. "v1 final draft"
 	Content   interface{} `json:"content"`
 	CreatedAt time.Time   `json:"created_at"`
@@ -33,9 +33,9 @@ type FileVersion struct {
 type ActivityEventKind string
 
 const (
-	ActivityEdit    ActivityEventKind = "edit"
-	ActivityComment ActivityEventKind = "comment"
-	ActivitySign    ActivityEventKind = "sign"
+	ActivityEdit     ActivityEventKind = "edit"
+	ActivityComment  ActivityEventKind = "comment"
+	ActivitySign     ActivityEventKind = "sign"
 	ActivitySnapshot ActivityEventKind = "snapshot"
 )
 
@@ -82,9 +82,9 @@ type LoginResponse struct {
 }
 
 type ErrorResponse struct {
-	Error           string `json:"error"`
-	RemainingAttempts int  `json:"remaining_attempts,omitempty"`
-	LockedUntil     string `json:"locked_until,omitempty"`
+	Error             string `json:"error"`
+	RemainingAttempts int    `json:"remaining_attempts,omitempty"`
+	LockedUntil       string `json:"locked_until,omitempty"`
 }
 
 type AuthStatusResponse struct {

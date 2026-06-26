@@ -15,8 +15,8 @@ import (
 // the client-supplied X-Account-ID header.
 const (
 	CtxAuthenticated = "authenticated"
-	CtxUserID        = "userID"   // verified account id from the JWT subject
-	CtxIsAdmin       = "isAdmin"  // true if the JWT carries the admin scope
+	CtxUserID        = "userID"  // verified account id from the JWT subject
+	CtxIsAdmin       = "isAdmin" // true if the JWT carries the admin scope
 )
 
 // Auth validates the session JWT, and on success sets the verified identity

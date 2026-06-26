@@ -1,6 +1,7 @@
 // spaces_ext.go — additive handler methods on SpacesHandler for:
-//   reactions (OFFICE-SPACES-1), pins (OFFICE-SPACES-6),
-//   user status (OFFICE-SPACES-4), channel search (OFFICE-SPACES-5).
+//
+//	reactions (OFFICE-SPACES-1), pins (OFFICE-SPACES-6),
+//	user status (OFFICE-SPACES-4), channel search (OFFICE-SPACES-5).
 //
 // Presence (status/reactions/pins) is held in fast in-memory indexes but is now
 // WRITE-THROUGH to the durable spaces.Persister, and the indexes are rebuilt
@@ -421,7 +422,8 @@ func (h *SpacesHandlerExt) canSeeUserStatus(requester, target string) bool {
 // SearchMessages GET /api/spaces/channels/:channelId/search?q=...
 //
 // Supports plain terms plus operators:
-//   from:user  before:date  after:date  has:link  has:file
+//
+//	from:user  before:date  after:date  has:link  has:file
 //
 // The plain word terms are matched against a real FTS5 inverted index when the
 // Persister supports it (SQLitePersister); the operator filters (from/before/
@@ -535,20 +537,23 @@ func (h *SpacesHandlerExt) ReplyThread(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if h.botSink != nil {
+		h.botSink.OnMessageCreated(msg.ChannelID, msg.ID, msg.AuthorID, msg.Body, msg.ThreadParent)
+	}
 	c.JSON(http.StatusCreated, msg)
 }
 
 // ---- search filter -----------------------------------------------------------
 
 type searchFilter struct {
-	terms   []string
-	from    string
-	before  time.Time
-	after   time.Time
+	terms     []string
+	from      string
+	before    time.Time
+	after     time.Time
 	hasBefore bool
 	hasAfter  bool
-	hasLink bool
-	hasFile bool
+	hasLink   bool
+	hasFile   bool
 }
 
 func parseSearchFilter(raw string) searchFilter {

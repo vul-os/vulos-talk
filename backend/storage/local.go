@@ -917,4 +917,3 @@ func (s *LocalStorage) DeleteSuggestion(fileID, suggestionID string) error {
 	}
 	return nil
 }
-

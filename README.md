@@ -2,9 +2,9 @@
 
 # Vulos Talk
 
-**Team chat for your own server — channels, DMs, threads, and huddles in a single Go binary.**
+**Team chat for your own server — a Slack/Google-Chat-class workspace in a single Go binary.**
 
-Spaces (channels / DMs) · Threads · Reactions · Pins · Search · Presence · Huddles
+Channels / DMs · Threads · Reactions · Pins · Search · Presence · Slash commands · Bots & apps · Huddles
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.0-informational)](CHANGELOG.md)
@@ -65,32 +65,54 @@ through clean seams; products never import one another's code.
 
 ## Features
 
-- **Spaces** — public & private channels plus direct messages, all backed by a
-  CRDT message store that survives restarts (durable SQLite).
-- **Threads** — reply in a side-panel thread without derailing the channel.
-- **Reactions & pins** — emoji reactions and per-channel pinned messages.
+- **Slack/Google-Chat-class UI** — three-pane desktop layout (sidebar · message
+  stream · thread panel) with a workspace switcher, collapsible Channels / DMs /
+  Threads / Activity sections, unread bolding + mention badges, presence dots, a
+  ⌘K quick-switcher, global search, and a `?` keyboard-shortcut overlay.
+- **Spaces** — public & private channels plus direct messages and **group DMs**,
+  all backed by a CRDT message store that survives restarts (durable SQLite).
+- **Dense message stream** — author grouping, day separators, a hover toolbar
+  (react · reply-in-thread · edit · delete · pin · copy-link), reactions,
+  `@mentions` with autocomplete, Markdown, inline attachments, link previews,
+  read/unread with jump-to-unread, and typing indicators.
+- **Threads** — Slack-style right-hand thread panel with "also send to channel".
+- **Composer** — Markdown + preview, emoji picker, `@mention` and
+  **`/slash-command` autocomplete**, attachments, Shift+Enter newline / Enter send.
+- **Bots & apps** — a documented bot framework + REST API: bot tokens (hashed at
+  rest), signed event webhooks, slash commands, incoming webhooks, an SSE event
+  stream, and a self-hostable **Apps & Bots** admin console. See
+  [docs/BOT-API.md](docs/BOT-API.md).
 - **Search** — SQLite FTS5 full-text search within a channel.
-- **Presence** — REST/poll heartbeat + roster with custom status.
-- **Rich messages** — Markdown rendering, `@mentions`, and file uploads.
+- **Presence** — online/away/DND with custom status (REST/poll heartbeat + roster).
 - **Huddles** — WebRTC meetings with a lobby, organizer-only admit/deny,
   short-lived signed join tokens, TURN/ICE credentials, and recordings.
+- **Responsive + a11y** — single-column mobile layout with a channel drawer,
+  bottom nav, and full-screen composer; no horizontal scroll at 360px; ≥44px taps.
 - **Single binary** — Go backend + embedded React SPA; SQLite by default,
   optional PostgreSQL. Zero telemetry.
 - **Standalone-first** — runs with no cloud; an optional control-plane seam is
-  engaged only when explicitly configured.
+  engaged only when explicitly configured (including the bot registry seam).
 
 ## Screenshots
 
 Generated from a seeded demo backend with `npm run screenshots`
 (see [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md)).
 
-| Spaces (`#general`) | Threaded reply |
+| Channel + message stream | Threaded reply |
 |---|---|
 | ![Spaces](docs/screenshots/hero.png) | ![Thread](docs/screenshots/thread.png) |
 
-| Direct message | Huddles |
+| Direct message | In-channel search |
 |---|---|
-| ![DM](docs/screenshots/dm.png) | ![Huddles](docs/screenshots/huddles.png) |
+| ![DM](docs/screenshots/dm.png) | ![Search](docs/screenshots/search.png) |
+
+| Slash-command autocomplete | Apps & Bots console |
+|---|---|
+| ![Slash command](docs/screenshots/slash-command.png) | ![Bots](docs/screenshots/bots.png) |
+
+| Mobile (single column) | Huddles |
+|---|---|
+| <img src="docs/screenshots/mobile.png" alt="Mobile" width="240"> | ![Huddles](docs/screenshots/huddles.png) |
 
 ## Quick start (standalone)
 
@@ -138,7 +160,11 @@ npm run dev:web   # Vite on :5175 proxying /api → :8080
    Browser ──▶  │  gin HTTP server                                                                │
    (React SPA)  │   ├── /api/auth/*        minimal status/me (no login UI; redirects to identity) │
                 │   ├── /api/spaces/*      channels · DMs · messages · threads · reactions · pins  │
-                │   │                      · status · search · presence  ──▶  CRDT SpacesStore     │
+                │   │                      · status · search · presence · slash-commands           │
+                │   │                                                       ──▶  CRDT SpacesStore   │
+                │   ├── /api/bots          bot/app admin (create · rotate · scopes · webhooks)      │
+                │   ├── /api/bot/v1/*      bot REST API (Bearer bot-token) + SSE event stream       │
+                │   ├── /api/bot/hooks/*   per-bot incoming webhooks  ──▶  bots.Registry (seam)     │
                 │   ├── /api/meetings/*    huddle rooms (CRUD)                  (SQLite)            │
                 │   ├── /api/meet/*        lobby · signed join tokens · admit/deny · recordings    │
                 │   ├── /api/turn/*        short-lived TURN/ICE credentials                        │
@@ -151,6 +177,36 @@ npm run dev:web   # Vite on :5175 proxying /api → :8080
 ```
 
 Full detail and the `TODO(seam-C)` huddle/video plan: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Bots & apps
+
+Talk ships a clean, documented **bot/app framework** so you can build
+integrations that post messages, react, read history, respond to slash commands,
+and receive signed events — equally suited to OSS self-hosting and Vulos
+Workspace/Cloud.
+
+- **Bot tokens** — each bot has a Bearer **bot token** (stored only as a sha256
+  hash) and a **signing secret**, plus a scope set
+  (`chat:write`, `history:read`, `channels:read`, `members:read`, `reactions:write`).
+- **REST API** (`/api/bot/v1/`) — post messages, read history, list
+  channels/members, add/remove reactions; every route is scope- and
+  membership-checked.
+- **Signed events** — Talk POSTs `message.created`, `app_mention`,
+  `member_joined`, and `slash_command` events to a bot's webhook URL with
+  `X-Vulos-Signature: v0=<hmac-sha256>` over `"<timestamp>." + body` (Slack-style),
+  verifiable with the signing secret. An **SSE event stream** is also available
+  for bots behind NAT (socket-mode style).
+- **Slash commands & incoming webhooks** — register `/commands` that POST to your
+  handler, and drop messages into a channel via a simple per-bot incoming
+  webhook URL.
+- **Registry seam (OSS ↔ Cloud)** — a `bots.Registry` interface with a
+  **standalone default** (local SQLite store + the **Apps & Bots** admin console,
+  zero cloud) and a **control-plane hook** so Vulos Cloud/Workspace can issue and
+  manage bot apps per org. Core never imports the cloud adapter — mirroring the
+  existing `backend/seam` pattern.
+
+A minimal **example bot** lives in [`examples/echo-bot/`](examples/echo-bot/).
+Full reference: **[docs/BOT-API.md](docs/BOT-API.md)**.
 
 ## Configuration
 
@@ -170,6 +226,7 @@ relies on the shared `vulos.org` session cookie. When `auth.enabled` is `false`
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, request flow, the integration seam, and the `seam-C` roadmap |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | `config.yaml` reference + environment variables |
 | [docs/API.md](docs/API.md) | REST API surface (Spaces, Meetings, Huddles, presence) |
+| [docs/BOT-API.md](docs/BOT-API.md) | Bot framework: tokens, REST API, signed events, slash commands, incoming webhooks, registry seam |
 | [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) | How the demo screenshotter works + how to regenerate |
 | [CHANGELOG.md](CHANGELOG.md) | Release history (Keep a Changelog) |
 
