@@ -40,6 +40,17 @@ func NewRecordingHandler(store storage.Storage) *RecordingHandler {
 	return &RecordingHandler{store: store}
 }
 
+// blobStore returns the bucket store for this request: the per-request gateway
+// store when the Vulos OS storage-seam headers are present (per-user bucket,
+// "talk/" space), otherwise the process-wide shared store (standalone env-
+// configured S3, or inactive). Callers must check Active() before use.
+func blobStore(c *gin.Context) *BucketStore {
+	if gw := NewRequestBucketStore(c.Request.Header); gw != nil {
+		return gw
+	}
+	return SharedBucketStore()
+}
+
 // newRecordingID generates a 22-char URL-safe base64 ID (16 random bytes).
 func newRecordingID() (string, error) {
 	b := make([]byte, 16)
@@ -111,14 +122,14 @@ func (h *RecordingHandler) Upload(c *gin.Context) {
 	}
 
 	bucketKey := ""
-	bs := SharedBucketStore()
-	if storage.OrgBucketClient() != nil {
+	bs := blobStore(c)
+	if bs.Active() {
 		if err := bs.PutObject(accountID, fileName, data, "video/webm"); err != nil {
 			res.Release()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "bucket upload failed: " + err.Error()})
 			return
 		}
-		bucketKey = storage.OrgScopedKey(accountID, fileName)
+		bucketKey = bs.Key(accountID, fileName)
 	} else {
 		// OSS fallback — write blob to local filesystem.
 		if err := os.MkdirAll(localRecordingsDir, 0755); err != nil {
@@ -229,9 +240,8 @@ func (h *RecordingHandler) Download(c *gin.Context) {
 	c.Header("Content-Type", "video/webm")
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, rec.FileName))
 
-	// Try bucket first.
-	if storage.OrgBucketClient() != nil && rec.BucketKey != "" {
-		bs := SharedBucketStore()
+	// Try bucket first (per-request gateway bucket when present, else shared).
+	if bs := blobStore(c); bs.Active() && rec.BucketKey != "" {
 		data, err := bs.GetObject(rec.AccountID, rec.FileName)
 		if err == nil && data != nil {
 			c.Data(http.StatusOK, "video/webm", data)
@@ -271,9 +281,10 @@ func (h *RecordingHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	// Remove from bucket if present.
-	if storage.OrgBucketClient() != nil && rec.BucketKey != "" {
-		_ = SharedBucketStore().DeleteObject(rec.AccountID, rec.FileName)
+	// Remove from bucket if present (per-request gateway bucket when present,
+	// else shared).
+	if bs := blobStore(c); bs.Active() && rec.BucketKey != "" {
+		_ = bs.DeleteObject(rec.AccountID, rec.FileName)
 	}
 
 	// Remove local fallback blob if present.
