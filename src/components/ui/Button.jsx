@@ -1,5 +1,5 @@
 /**
- * Button — Vulos Office design system
+ * Button — Vulos Talk design system
  * ----------------------------------------------------------------------------
  * Variants:
  *   - primary      Accent (deep teal) — the one "yes" affordance per surface

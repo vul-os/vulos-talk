@@ -1,7 +1,7 @@
-// Package seam defines the integration "seam" between vulos-office's core and
+// Package seam defines the integration "seam" between vulos-talk's core and
 // any external control plane (e.g. vulos-cloud / "cp").
 //
-// GOAL: vulos-office must run COMPLETELY STANDALONE as an open-source project
+// GOAL: vulos-talk must run COMPLETELY STANDALONE as an open-source project
 // with NO dependency on vulos-cloud. The standalone path is the default and
 // works with zero cloud configuration.
 //

@@ -1,11 +1,11 @@
-// Vulos Office — Service Worker
+// Vulos Talk — Service Worker
 // Strategy:
 //   - App shell (index.html, JS/CSS chunks, static assets) → cache-first with
 //     network fallback on miss and background revalidation.
 //   - /api/** and /collab/** → network-only (never cache server state).
 //   - Offline fallback: if a navigation request fails, serve cached index.html.
 
-const CACHE_NAME = 'vulos-office-v1';
+const CACHE_NAME = 'vulos-talk-v1';
 
 // Assets that are cached on install (app shell).
 // In production Vite outputs hashed filenames; we cache the root entry points

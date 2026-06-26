@@ -48,6 +48,26 @@ unauthenticated user to the central identity surface (`app.vulos.org/login`) and
 relies on the shared `vulos.org` session cookie. When `auth.enabled` is false
 (the self-host default) every request is the single-user `self` identity.
 
+## Configuration & self-host
+
+Talk runs fully self-hosted with zero cloud configuration — the defaults in
+`config.yaml` are production-safe for a single-tenant deployment. Key knobs:
+
+- `config.yaml` — server address, `data_dir`/`uploads_dir`, auth toggle, and the
+  storage backend (`local` SQLite by default, or `postgres`).
+- `VULOS_TALK_JWT_SECRET` — HS256 signing secret. **Required when `auth.enabled`
+  is true** (the server fails closed at startup without it). It must match the
+  secret used by the central identity issuer so Talk accepts the shared session.
+- `VULOS_TALK_DEV=1` — permits an insecure built-in dev secret for local work.
+  Never set in production.
+- `VULOS_TALK_CORS_ORIGINS` — comma-separated origin allowlist (enables
+  credentialed CORS). Unset = allow all origins without credentials (same-origin).
+- `VULOS_LOBBY_DB` — path to the durable lobby/meeting SQLite store
+  (default `<data_dir>/lobby.db`).
+- `VULOS_CP_BASE_URL` — reserved seam for the optional vulos-cloud control plane.
+  The cloud adapter ships as a separate package; the standalone build here never
+  imports it and always runs with the permissive self-host provider.
+
 ## Roadmap
 
 `// TODO(seam-C): route huddle video through vulos-meet` — Talk currently hosts

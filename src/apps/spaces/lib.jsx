@@ -1,5 +1,5 @@
 /**
- * src/apps/spaces/lib.jsx — @vulos/office-client spaces library entry
+ * src/apps/spaces/lib.jsx — @vulos/talk-client spaces library entry
  *
  * Exports <SpacesAppLib /> — the Spaces (chat + calls) app as a single
  * embeddable React component.

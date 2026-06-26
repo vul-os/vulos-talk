@@ -39,7 +39,7 @@ function Sidebar({ collapsed, children, className = '' }) {
   )
 }
 
-Sidebar.Brand = function SidebarBrand({ logoSrc, name = 'Vulos Office' }) {
+Sidebar.Brand = function SidebarBrand({ logoSrc, name = 'Vulos Talk' }) {
   const { collapsed } = useContext(SidebarCtx)
   return (
     <div className={[
@@ -63,7 +63,7 @@ Sidebar.Brand = function SidebarBrand({ logoSrc, name = 'Vulos Office' }) {
             Vulos
           </span>
           <span className="font-mono text-[10px] uppercase tracking-wider text-ink-faint leading-tight">
-            Office
+            Talk
           </span>
         </div>
       )}

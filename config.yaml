@@ -1,4 +1,4 @@
-# Vulos Office Configuration
+# Vulos Talk Configuration
 
 server:
   addr: ":8080"
@@ -20,5 +20,5 @@ storage:
     port: 5432
     user: "postgres"
     password: ""
-    database: "vulos_office"
+    database: "vulos_talk"
     sslmode: "disable"

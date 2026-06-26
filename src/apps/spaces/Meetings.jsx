@@ -111,7 +111,7 @@ export default function Meetings() {
 
   return (
     <div className="flex flex-col h-full bg-bg">
-      {/* Topbar — Vulos Office pattern */}
+      {/* Topbar — Vulos Talk pattern */}
       <Topbar
         title={
           <h1 className="inline-flex items-center gap-2 text-md font-semibold text-ink tracking-tightish">

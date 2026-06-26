@@ -12,7 +12,7 @@ import TalkShell from '../shells/TalkShell.jsx'
 import '../index.css'
 // RELAY-CLIENT-02: configure relay-client seams BEFORE bootstrap touches LS.
 import { configure } from '@vulos/relay-client/endpoints'
-configure({ lsKeyPrefix: 'vulos.office.endpoints.v1', healthPath: '/api/auth/status' })
+configure({ lsKeyPrefix: 'vulos.talk.endpoints.v1', healthPath: '/api/auth/status' })
 import { bootstrapOffline } from '@vulos/relay-client/offlineBootstrap'
 
 bootstrapOffline()
