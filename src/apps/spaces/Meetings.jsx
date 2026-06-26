@@ -116,7 +116,7 @@ export default function Meetings() {
         title={
           <h1 className="inline-flex items-center gap-2 text-md font-semibold text-ink tracking-tightish">
             <Video size={16} className="text-accent" />
-            Meet
+            Huddles
           </h1>
         }
         actions={

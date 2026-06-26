@@ -11,7 +11,9 @@
     "build:go": "go build -o vulos-talk .",
     "start": "go run .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "screenshots": "node scripts/screenshots.mjs",
+    "seed-demo": "node scripts/seed-demo.mjs"
   },
   "dependencies": {
     "@vulos/relay-client": "file:../vulos-relay/client",
@@ -30,6 +32,7 @@
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.1.2",
     "jsdom": "^29.1.1",
+    "playwright": "^1.49.1",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "vite": "^6.3.5",

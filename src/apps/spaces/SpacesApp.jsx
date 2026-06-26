@@ -1,6 +1,6 @@
 /**
  * SpacesApp — Vulos Spaces surface: channels, DMs, threads.
- * Routes: /spaces  /spaces/:channelId
+ * Routes (mounted by TalkShell): /  /channels/:id  /dm/:id
  *
  * Channel sidebar (public/private channels + DMs) + ChannelView message pane.
  * Backed by the CRDT message store (OFFICE-60); REST/poll presence live via
@@ -527,8 +527,15 @@ function SpacesSidebar({
 // SpacesApp — root component
 // ---------------------------------------------------------------------------
 
+// Route helper: TalkShell mounts SpacesApp at /channels/:id and /dm/:id, so the
+// path param is `id` and channels/DMs live under different prefixes. Keep this in
+// sync with the routes declared in src/shells/TalkShell.jsx.
+function channelPath(ch) {
+  return `${ch.type === 'dm' ? '/dm' : '/channels'}/${ch.id}`
+}
+
 export default function SpacesApp() {
-  const { channelId } = useParams()
+  const { id: channelId } = useParams()
   const navigate = useNavigate()
   const [channels, setChannels] = useState([])
   const [activeChannel, setActiveChannel] = useState(null)
@@ -567,15 +574,17 @@ export default function SpacesApp() {
         const found = chs.find((c) => c.id === channelId)
         if (found) setActiveChannel(found)
       } else if (chs.length > 0) {
+        // Show the first channel on the bare route without rewriting the URL —
+        // navigating here would remount this component and loop. The URL only
+        // changes on an explicit user selection (selectChannel).
         setActiveChannel(chs[0])
-        navigate(`/spaces/${chs[0].id}`, { replace: true })
       }
     })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   function selectChannel(ch) {
     setActiveChannel(ch)
-    navigate(`/spaces/${ch.id}`)
+    navigate(channelPath(ch))
   }
 
   if (loading) {
