@@ -17,7 +17,11 @@
 package storage
 
 import (
+	"crypto/subtle"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 )
 
@@ -31,22 +35,107 @@ const (
 	HdrStorageAccessKey = "X-Vulos-Storage-Access-Key"
 	HdrStorageSecretKey = "X-Vulos-Storage-Secret-Key"
 	HdrStorageSession   = "X-Vulos-Storage-Session-Token"
+
+	// HdrStorageBrokerAuth carries the shared broker secret the Vulos OS gateway
+	// presents to prove it injected the storage-seam headers. The seam headers
+	// above are trusted ONLY when this header matches EnvStorageBrokerSecret via
+	// a constant-time compare (see brokerAuthorized). Mirrors lilmail's
+	// X-Vulos-Broker-Auth gate.
+	HdrStorageBrokerAuth = "X-Vulos-Storage-Broker-Auth"
 )
+
+// EnvStorageBrokerSecret is the env var that gates the whole storage-seam path.
+// When empty, the X-Vulos-Storage-* headers are NEVER trusted (standalone/OSS
+// behaviour: env S3 or local filesystem). The Vulos OS gateway sets this same
+// secret on the box and injects it as HdrStorageBrokerAuth on every request.
+const EnvStorageBrokerSecret = "VULOS_STORAGE_BROKER_SECRET"
 
 // TalkPrefixSpace is the per-product key space Talk owns inside the shared
 // per-user bucket. All Talk blobs live under "<injected-prefix>/talk/".
 const TalkPrefixSpace = "talk"
 
+// brokerAuthorized reports whether the storage-seam headers on this request may
+// be trusted. The gate is closed (false) unless EnvStorageBrokerSecret is set
+// AND the request presents a matching HdrStorageBrokerAuth header, compared in
+// constant time. When the env secret is unset (standalone/OSS) the seam is
+// always ignored, so a client cannot inject storage credentials by spoofing the
+// X-Vulos-Storage-* headers.
+func brokerAuthorized(h http.Header) bool {
+	secret := strings.TrimSpace(os.Getenv(EnvStorageBrokerSecret))
+	if secret == "" {
+		return false // gate disabled — never trust seam headers
+	}
+	presented := h.Get(HdrStorageBrokerAuth)
+	if presented == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(secret)) == 1
+}
+
+// endpointAllowed reports whether the injected endpoint is safe to use. HTTPS
+// endpoints are always allowed; plaintext HTTP is allowed ONLY when the host is
+// a loopback or private-network address (so an on-box MinIO reachable over http
+// works), and rejected for any public host so a compromised/forged endpoint
+// header cannot exfiltrate credentials over the network in the clear.
+func endpointAllowed(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return true
+	case "http":
+		return isPrivateHost(u.Hostname())
+	default:
+		return false
+	}
+}
+
+// isPrivateHost reports whether host is a loopback or private-network host. It
+// accepts "localhost", IP literals in loopback/private/link-local/unspecified
+// ranges, and single-label hostnames (e.g. a container/service name like
+// "minio") which cannot be public FQDNs. Any dotted public hostname is rejected.
+func isPrivateHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback() || ip.IsPrivate() ||
+			ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+			ip.IsUnspecified()
+	}
+	// A single-label hostname (no dot) is an internal service/container name,
+	// not a public FQDN.
+	return !strings.Contains(host, ".")
+}
+
 // NewGatewayS3Client builds a per-request S3 client from the storage-seam
 // headers injected by the Vulos OS gateway. The returned bool is false when the
-// request carries no storage endpoint header (i.e. it is not behind the
-// gateway) and callers must fall back to standalone storage.
+// request is not behind the gateway: either the broker-auth gate is closed (env
+// secret unset or HdrStorageBrokerAuth missing/mismatched), the storage endpoint
+// header is absent, or the endpoint is unsafe (non-loopback plaintext http). In
+// every such case callers must fall back to standalone storage.
 //
 // The client's prefix is "<X-Vulos-Storage-Prefix>/talk" so every object it
 // writes is confined to Talk's key space within the user's shared bucket.
 func NewGatewayS3Client(h http.Header) (*OfficeS3Client, bool) {
+	// Broker-auth gate: ignore the seam headers entirely unless the request
+	// proves it came through the trusted Vulos OS gateway.
+	if !brokerAuthorized(h) {
+		return nil, false
+	}
+
 	endpoint := strings.TrimSpace(h.Get(HdrStorageEndpoint))
 	if endpoint == "" {
+		return nil, false
+	}
+	// Endpoint safety: reject plaintext http to arbitrary external hosts.
+	if !endpointAllowed(endpoint) {
 		return nil, false
 	}
 
