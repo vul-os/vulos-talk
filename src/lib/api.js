@@ -335,4 +335,11 @@ export const api = {
   // Slash commands surfaced to the composer autocomplete.
   //   GET /api/spaces/commands → [{name, description, bot_id}]
   spacesListCommands: () => request('/spaces/commands'),
+
+  // Per-channel Board auth: mint a board-scoped HMAC token for the websocket
+  // board sync server. The control plane returns {token, exp} (empty token in
+  // dev/open mode). Talk standalone may not implement this endpoint — callers
+  // must catch and connect token-less. See ChannelBoard.
+  //   GET /api/board/token?room=<channelId> → {token, exp}
+  boardToken: (room) => request(`/board/token?room=${encodeURIComponent(room)}`),
 }

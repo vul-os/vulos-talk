@@ -20,10 +20,11 @@
  *   Until that fabric path exists, we use the board sync server below, which
  *   gives a fully-working collaborative board now.
  */
-import { useMemo, useEffect } from 'react'
+import { useMemo, useEffect, useState } from 'react'
 import { BoardApp, createBoardDoc, createWebsocketProvider } from '@vulos/board-ui'
 import '@vulos/board-ui/style.css'
 import { avatarColor } from './avatar.js'
+import { api } from '../../lib/api.js'
 
 // Board sync server. Override per-deploy with VITE_BOARD_WS_URL.
 const BOARD_WS_URL = import.meta.env?.VITE_BOARD_WS_URL || 'wss://board.vulos.org/ws'
@@ -35,18 +36,41 @@ export default function ChannelBoard({ channelId, currentUser, displayName }) {
   // Connect a transport for this channel's board. The provider exposes
   // `.awareness` (cursors/presence), which BoardApp consumes.
   //
-  // PROD: no auth token is sent yet. createWebsocketProvider() accepts an
-  // optional `token` (forwarded as `?token=`), but Talk has no board-scoped
-  // credential to mint today, so the board server must currently authorize the
-  // room by other means (e.g. network boundary). Before this ships to prod,
-  // pass a channel-scoped token here so the board server can authn/authz the
-  // room — otherwise anyone who can reach BOARD_WS_URL can join any room.
-  const provider = useMemo(
-    () => createWebsocketProvider({ url: BOARD_WS_URL, room: channelId, doc: ydoc }),
-    [channelId, ydoc],
-  )
+  // AUTH: the websocket board server authorizes connections with an HMAC
+  // ?token=. We fetch a channel-scoped token from the control plane
+  // (GET /api/board/token?room=<channelId>) BEFORE connecting and forward it to
+  // createWebsocketProvider({ token }). Because the fetch is async the provider
+  // is created in an effect (not useMemo). Talk standalone may not implement the
+  // endpoint and dev/open mode returns an empty token — both degrade to a
+  // token-less connect so the board keeps working. BoardApp tolerates a
+  // not-yet-ready provider (awareness is optional).
+  const [provider, setProvider] = useState(null)
 
-  useEffect(() => () => { try { provider.destroy() } catch {} }, [provider])
+  useEffect(() => {
+    let alive = true
+    let p = null
+    ;(async () => {
+      let token
+      try {
+        const r = await api.boardToken(channelId)
+        // Empty token (dev/open mode) → connect anyway.
+        token = r && r.token ? r.token : undefined
+      } catch (e) {
+        // No /api/board/token (Talk standalone / no auth): log and connect
+        // token-less so the board still works.
+        console.warn('[board] token fetch failed; connecting without token', e)
+      }
+      if (!alive) return
+      p = createWebsocketProvider({ url: BOARD_WS_URL, room: channelId, doc: ydoc, token })
+      setProvider(p)
+    })()
+    // Tear down on channel switch / unmount — never leak a socket.
+    return () => {
+      alive = false
+      if (p) { try { p.destroy() } catch { /* already gone */ } }
+      setProvider(null)
+    }
+  }, [channelId, ydoc])
 
   // Map Talk's current user onto board-ui's BoardUser shape.
   const user = useMemo(() => ({
@@ -59,7 +83,7 @@ export default function ChannelBoard({ channelId, currentUser, displayName }) {
     <div className="flex-1 min-h-0 bg-bg">
       <BoardApp
         ydoc={ydoc}
-        awareness={provider.awareness}
+        awareness={provider?.awareness}
         user={user}
         boardId={channelId}
       />
