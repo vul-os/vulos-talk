@@ -49,6 +49,10 @@ only honest way to attribute seeded messages to different people.
 | `hero.png` | Spaces — `#general` with the seeded team conversation (reactions, pin, member roster) |
 | `thread.png` | `#engineering` with the threaded reply side-panel open |
 | `dm.png` | A direct message between two teammates |
+| `search.png` | In-channel search with live, highlighted results |
+| `slash-command.png` | Slash-command autocomplete in the composer |
+| `bots.png` | Apps & Bots — create and manage bot apps + tokens |
+| `mobile.png` | Single-column mobile layout with the bottom nav (390×844) |
 | `huddles.png` | The huddles dashboard — scheduled rooms with join links |
 
 ## Limitations

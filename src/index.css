@@ -189,6 +189,151 @@
 .tiptap a:hover { color: var(--accent-hover); }
 
 /* ============================================================================
+ * Chat message body — .rich-message
+ * ----------------------------------------------------------------------------
+ * The sanitised markdown rendered by RichMessage.jsx (mentions, inline code,
+ * code fences, links, lists, quotes). Unlike the serif document body, the chat
+ * stream stays in the sans face with a snug rhythm so dense conversations read
+ * fast. Every colour resolves through a token — dark + light parity for free.
+ * ========================================================================== */
+.rich-message {
+  font-family: var(--font-sans);
+  letter-spacing: var(--tracking-tight);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.rich-message > :first-child { margin-top: 0; }
+.rich-message > :last-child  { margin-bottom: 0; }
+
+.rich-message strong { font-weight: 600; color: var(--ink); }
+.rich-message em     { font-style: italic; }
+.rich-message del    { color: var(--ink-faint); text-decoration: line-through; }
+
+/* Inline code — a quiet teal-tinted chip, mono face, never wraps awkwardly. */
+.rich-message code.inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--accent-tint);
+  color: var(--accent-press);
+  border: 1px solid var(--accent-tint-2);
+  padding: 0.05em 0.35em;
+  border-radius: var(--radius-xs);
+  white-space: break-spaces;
+}
+
+/* Links — accent, underline that warms on hover. */
+.rich-message a.msg-link {
+  color: var(--accent-press);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--accent-press) 40%, transparent);
+  transition: text-decoration-color var(--duration-fast) var(--ease-out);
+}
+.rich-message a.msg-link:hover { text-decoration-color: var(--accent-press); }
+
+/* @mention chips — teal for people, purple for the loud @channel broadcast. */
+.rich-message .mention {
+  font-weight: 500;
+  color: var(--accent-press);
+  background: var(--accent-tint);
+  border-radius: var(--radius-xs);
+  padding: 0 0.28em;
+  white-space: nowrap;
+}
+.rich-message .mention-channel {
+  color: var(--brand);
+  background: var(--brand-subtle);
+}
+
+/* Lists — tucked tight against the message rhythm, faint markers. */
+.rich-message ul,
+.rich-message ol { margin: 0.3rem 0; padding-left: 1.35rem; }
+.rich-message ul { list-style: disc; }
+.rich-message ol { list-style: decimal; }
+.rich-message li { margin: 0.1rem 0; }
+.rich-message li::marker { color: var(--ink-faint); }
+
+/* Blockquote — a hairline accent rail, muted ink. */
+.rich-message blockquote {
+  margin: 0.4rem 0;
+  padding: 0.05rem 0 0.05rem 0.75rem;
+  border-left: 2px solid var(--accent);
+  color: var(--ink-muted);
+}
+
+/* Fenced code block — sunk surface, hairline frame, horizontal scroll. */
+.rich-message pre,
+.rich-message pre.hljs-pre {
+  margin: 0.5rem 0;
+  padding: 0.7rem 0.85rem;
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+.rich-message pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--ink);
+  font-size: inherit;
+}
+
+/* ── highlight.js theme — mapped onto Vulos tokens so code fences pick up the
+ *    accent/signal palette instead of hljs's stock github/atom colours. ── */
+.hljs-comment, .hljs-quote { color: var(--ink-faint); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-name, .hljs-tag {
+  color: var(--accent-press);
+}
+.hljs-string, .hljs-attr, .hljs-symbol, .hljs-bullet, .hljs-addition {
+  color: var(--signal-success);
+}
+.hljs-number, .hljs-literal, .hljs-type, .hljs-params, .hljs-meta, .hljs-link {
+  color: var(--signal-warning);
+}
+.hljs-title, .hljs-section, .hljs-function .hljs-title { color: var(--ink); font-weight: 600; }
+.hljs-attribute, .hljs-variable, .hljs-template-variable { color: var(--brand); }
+.hljs-deletion { color: var(--signal-error); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
+/* Search match highlight — used inside the results list and on the body of a
+ * message jumped-to from search/pins. Amber wash, readable on either theme. */
+mark.search-highlight {
+  background: color-mix(in srgb, var(--signal-warning) 32%, transparent);
+  color: var(--ink);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* ============================================================================
+ * Typing indicator — three dots that bounce in sequence. Honours
+ * prefers-reduced-motion (the dots fall back to a static row).
+ * ========================================================================== */
+.typing-dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--ink-faint);
+  animation: typing-bounce 1.2s var(--ease-out) infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.16s; }
+.typing-dot:nth-child(3) { animation-delay: 0.32s; }
+@keyframes typing-bounce {
+  0%, 70%, 100% { transform: translateY(0); opacity: 0.45; }
+  35%           { transform: translateY(-3px); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .typing-dot { animation: none; opacity: 0.6; }
+}
+
+/* ============================================================================
  * Skeleton shimmer — used by <Skeleton> / <LoadingState.Lines>.
  * A warm-neutral sunk surface with a slow accent-tinted sheen sweeping across.
  * Honours prefers-reduced-motion: the sheen stops, leaving a static block.

@@ -27,22 +27,11 @@ import { toast } from '../../lib/toast.jsx'
 import { STATUS_ONLINE } from '@vulos/relay-client/presence'
 import { PresenceDot, StatusPicker } from '../../components/PresenceBar.jsx'
 import { Button, IconButton, Input, Modal, Sidebar, LoadingState, ThemeSwitch } from '../../components/ui'
+import { avatarColor } from './avatar.js'
 
 // ---------------------------------------------------------------------------
 // useRestPresence (unchanged) — OFFICE-62 REST/poll presence.
 // ---------------------------------------------------------------------------
-
-const PRESENCE_COLORS = [
-  '#0f6a6c', '#4f7a4d', '#c08436', '#b8453a', '#4a6b8a', '#6e5b8a',
-  '#7a5a3d', '#3d6b5a', '#6a3d6a', '#8a6a2a',
-]
-
-function colorFromUserID(userID) {
-  if (!userID) return PRESENCE_COLORS[0]
-  let h = 0
-  for (let i = 0; i < userID.length; i++) h = ((h << 5) - h + userID.charCodeAt(i)) | 0
-  return PRESENCE_COLORS[Math.abs(h) % PRESENCE_COLORS.length]
-}
 
 function useRestPresence() {
   const [roster, setRoster] = useState([])
@@ -60,7 +49,7 @@ function useRestPresence() {
         displayName: e.display_name || e.user_id,
         status: e.status || 'online',
         statusText: e.status_text || '',
-        color: colorFromUserID(e.user_id),
+        color: avatarColor(e.user_id),
         online: true,
       })))
     } catch {}
@@ -359,7 +348,7 @@ function SpacesSidebar({
   const peersOnline = roster.filter((p) => !p.isSelf)
 
   return (
-    <Sidebar collapsed={false} className="w-60 h-full">
+    <Sidebar collapsed={false} className="!w-full md:!w-60 h-full">
       {/* Workspace header */}
       <div className="flex items-center justify-between h-12 px-3 border-b border-line flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0">
@@ -550,8 +539,8 @@ export default function SpacesApp() {
 
   return (
     <div className="flex flex-1 min-h-0 bg-bg">
-      {/* Sidebar — drawer on mobile */}
-      <div className={['md:flex md:w-auto', mobilePane === 'list' ? 'flex w-full' : 'hidden'].join(' ')}>
+      {/* Sidebar — drawer on mobile (clears the fixed bottom nav) */}
+      <div className={['md:flex md:w-auto pb-14 md:pb-0', mobilePane === 'list' ? 'flex w-full' : 'hidden'].join(' ')}>
         <SpacesSidebar
           channels={channels}
           activeId={activeChannel?.id}
@@ -569,8 +558,9 @@ export default function SpacesApp() {
         />
       </div>
 
-      {/* Main pane */}
-      <div className={['flex-1 min-h-0 flex-col', mobilePane === 'main' ? 'flex' : 'hidden md:flex'].join(' ')}>
+      {/* Main pane — reserve the bottom-nav height on mobile so the composer
+          is never hidden behind the fixed nav (md+ has no bottom nav). */}
+      <div className={['flex-1 min-h-0 flex-col pb-14 md:pb-0', mobilePane === 'main' ? 'flex' : 'hidden md:flex'].join(' ')}>
         {mainPane}
       </div>
 

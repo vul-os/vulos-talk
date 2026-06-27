@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AtSign } from 'lucide-react'
 import { PresenceDot } from '../../components/PresenceBar.jsx'
+import { avatarColor } from './avatar.js'
 
 /**
  * Parse the current @mention query from a textarea value + cursor position.
@@ -104,8 +105,8 @@ export default function MentionPicker({ members = [], query = '', onSelect, onCl
             ) : (
               <span className="relative flex-shrink-0">
                 <span
-                  className="inline-flex items-center justify-center w-6 h-6 rounded-full text-white text-xs font-bold"
-                  style={{ backgroundColor: `hsl(${(m.accountId.charCodeAt(0) || 0) % 360},55%,45%)` }}
+                  className="inline-flex items-center justify-center w-6 h-6 rounded-md text-white text-xs font-semibold"
+                  style={{ backgroundColor: avatarColor(m.accountId) }}
                 >
                   {(m.displayName || m.accountId || '?')[0].toUpperCase()}
                 </span>

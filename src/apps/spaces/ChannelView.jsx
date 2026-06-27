@@ -83,10 +83,10 @@ function TypingIndicator({ labels = [] }) {
         : 'Several people are typing…'
   return (
     <div className="px-4 h-5 flex items-center gap-1.5 text-2xs text-ink-faint" aria-live="polite">
-      <span className="flex gap-0.5">
-        <span className="w-1 h-1 rounded-full bg-ink-faint animate-pulse" />
-        <span className="w-1 h-1 rounded-full bg-ink-faint animate-pulse" style={{ animationDelay: '150ms' }} />
-        <span className="w-1 h-1 rounded-full bg-ink-faint animate-pulse" style={{ animationDelay: '300ms' }} />
+      <span className="flex items-end gap-[3px] pb-0.5">
+        <span className="typing-dot" />
+        <span className="typing-dot" />
+        <span className="typing-dot" />
       </span>
       <span className="italic">{text}</span>
     </div>

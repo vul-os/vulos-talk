@@ -20,6 +20,7 @@ import RichMessage from './RichMessage.jsx'
 import LinkPreview from './LinkPreview.jsx'
 import EmojiPicker from './EmojiPicker.jsx'
 import { PinBadge } from './PinnedPanel.jsx'
+import { avatarColor } from './avatar.js'
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000
 
@@ -35,9 +36,7 @@ function formatDate(ts) {
 
 function Avatar({ name, presencePeer, size = 36 }) {
   const initials = (name || '?')[0].toUpperCase()
-  const tints = ['#0f6a6c', '#4f7a4d', '#c08436', '#b8453a', '#4a6b8a', '#6e5b8a']
-  const idx = (name?.charCodeAt(0) || 0) % tints.length
-  const bg = presencePeer?.color || tints[idx]
+  const bg = presencePeer?.color || avatarColor(name)
   return (
     <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
       <div
