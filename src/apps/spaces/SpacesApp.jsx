@@ -357,7 +357,8 @@ function SpacesSidebar({
         className="group flex items-center justify-between h-14 px-3 border-b border-line flex-shrink-0 hover:bg-bg-hover transition-colors text-left"
       >
         <span className="flex items-center gap-2.5 min-w-0">
-          <TalkMark size={28} />
+          {/* Mark shown only on mobile; the desktop far-left rail already shows it (avoid a duplicate logo). */}
+          <span className="md:hidden"><TalkMark size={28} /></span>
           <span className="flex flex-col min-w-0 -space-y-0.5">
             <span className="text-sm font-semibold text-ink tracking-tightish truncate leading-tight">Vulos Talk</span>
             <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint leading-tight">

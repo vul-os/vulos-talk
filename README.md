@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="public/vulos-talk.png" alt="Vulos Talk" width="96" />
+
 # Vulos Talk
 
 **Team chat for your own server — a Slack/Google-Chat-class workspace in a single Go binary.**
