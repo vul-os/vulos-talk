@@ -357,8 +357,7 @@ function SpacesSidebar({
         className="group flex items-center justify-between h-14 px-3 border-b border-line flex-shrink-0 hover:bg-bg-hover transition-colors text-left"
       >
         <span className="flex items-center gap-2.5 min-w-0">
-          {/* Mark shown only on mobile; the desktop far-left rail already shows it (avoid a duplicate logo). */}
-          <span className="md:hidden"><TalkMark size={28} /></span>
+          <TalkMark size={28} />
           <span className="flex flex-col min-w-0 -space-y-0.5">
             <span className="text-sm font-semibold text-ink tracking-tightish truncate leading-tight">Vulos Talk</span>
             <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint leading-tight">
@@ -502,17 +501,6 @@ function WorkspaceRail({ view, activeChat, mentions, onHome, onActivity, navigat
       aria-label="Workspaces"
       className="hidden md:flex flex-col items-center w-[60px] flex-shrink-0 bg-bg-sunk border-r border-line py-2"
     >
-      <button
-        type="button"
-        onClick={onHome}
-        title="Vulos Talk"
-        aria-label="Vulos Talk home"
-        className="mb-1.5 rounded-xl ring-1 ring-line-strong/60 hover:ring-accent transition-[box-shadow,transform] duration-fast hover:scale-[1.03] active:scale-95"
-      >
-        <TalkMark size={36} />
-      </button>
-      <div className="w-7 h-px bg-line my-1.5" />
-
       <div className="flex flex-col w-full">
         <RailButton icon={Home} label="Channels" active={view === 'chat' && activeChat} onClick={onHome} />
         <RailButton icon={Bell} label="Activity" active={view === 'activity'} badge={mentions} onClick={onActivity} />
