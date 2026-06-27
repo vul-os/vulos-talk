@@ -34,6 +34,13 @@ export default function ChannelBoard({ channelId, currentUser, displayName }) {
 
   // Connect a transport for this channel's board. The provider exposes
   // `.awareness` (cursors/presence), which BoardApp consumes.
+  //
+  // PROD: no auth token is sent yet. createWebsocketProvider() accepts an
+  // optional `token` (forwarded as `?token=`), but Talk has no board-scoped
+  // credential to mint today, so the board server must currently authorize the
+  // room by other means (e.g. network boundary). Before this ships to prod,
+  // pass a channel-scoped token here so the board server can authn/authz the
+  // room — otherwise anyone who can reach BOARD_WS_URL can join any room.
   const provider = useMemo(
     () => createWebsocketProvider({ url: BOARD_WS_URL, room: channelId, doc: ydoc }),
     [channelId, ydoc],

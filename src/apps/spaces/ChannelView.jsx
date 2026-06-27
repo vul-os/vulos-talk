@@ -13,7 +13,7 @@
  *   - Thread panel with an "also send to channel" checkbox
  *   - Responsive: 3-pane desktop, full-screen composer + overlay thread on mobile
  */
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react'
 import {
   Send, Hash, Lock, AtSign, X, MessageSquare, ChevronRight, Search,
   Pin, Bell, UserPlus, AlignLeft, Eye, Headphones, ArrowDown, ArrowLeft, Smile, Slash,
@@ -36,7 +36,10 @@ import { getDefaultStore, STATE_DELETED } from '../../lib/crdt/messages.js'
 import { PresenceDot } from '../../components/PresenceBar.jsx'
 import { IconButton, Input, Modal, Topbar, Button, Tabs } from '../../components/ui'
 import { avatarColor } from './avatar.js'
-import ChannelBoard from './ChannelBoard.jsx'
+// Lazy-loaded: the board pulls in Excalidraw + Yjs, a large chunk we only want
+// fetched when a user first opens the Board tab — not on every channel open.
+// Vite code-splits this into its own async chunk.
+const ChannelBoard = lazy(() => import('./ChannelBoard.jsx'))
 
 const POLL_INTERVAL_MS = 3000
 const AUTO_AWAY_MS = 10 * 60 * 1000
@@ -749,7 +752,15 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
           />
 
           {tab === 'board' ? (
-            <ChannelBoard channelId={channel.id} currentUser={currentUser} displayName={selfLabel} />
+            <Suspense
+              fallback={
+                <div className="flex-1 min-h-0 grid place-items-center text-xs text-ink-faint">
+                  Loading board…
+                </div>
+              }
+            >
+              <ChannelBoard channelId={channel.id} currentUser={currentUser} displayName={selfLabel} />
+            </Suspense>
           ) : (
           <>
           {showSearch && <SearchBar messages={messages} onJump={jumpToMessage} onClose={() => setShowSearch(false)} />}

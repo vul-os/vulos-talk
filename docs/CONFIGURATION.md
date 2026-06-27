@@ -43,6 +43,7 @@ With `auth.enabled: false` (the default) every request is the single-user
 | `VULOS_TALK_CORS_ORIGINS` | Comma-separated origin allowlist; enables credentialed CORS. Unset = allow all origins **without** credentials (same-origin SPA). |
 | `VULOS_LOBBY_DB` | Path to the durable lobby/meeting SQLite store. Default: `<data_dir>/lobby.db`. |
 | `VULOS_CP_BASE_URL` | Reserved seam for the optional vulos-cloud control plane. The cloud adapter ships as a separate package; the standalone build never imports it and always runs with the permissive self-host provider. |
+| `VITE_BOARD_WS_URL` | Build-time (Vite) URL of the board sync server backing the per-channel **Board** tab (`@vulos/board-ui` whiteboard). Default: `wss://board.vulos.org/ws`. Note: Talk does not yet send a board-scoped auth token on this connection — the board server must authorize rooms by other means until that token is wired. The longer-term plan is to drop this server and pump board CRDT diffs over the Vulos Relay fabric (see `ChannelBoard.jsx` `TODO(seam)`). |
 
 ## Authentication model
 
