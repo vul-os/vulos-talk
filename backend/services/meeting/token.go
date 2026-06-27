@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -127,15 +128,33 @@ func ParticipantLeft(roomID string) {
 }
 
 // ── singleton secret ─────────────────────────────────────────────────────────
-// Loaded from VULOS_MEET_SECRET env var (hex-encoded 32 bytes).
-// If absent in dev mode, a random key is generated in-memory.
+// Loaded from VULOS_MEET_SECRET env var (hex-encoded ≥16 bytes).
+//
+// Fail-closed contract (mirrors middleware's JWT secret handling): in production
+// the secret MUST be set. An ephemeral in-memory key is only minted when dev
+// mode is explicitly enabled (VULOS_TALK_DEV=1) — otherwise we'd silently sign
+// join tokens with a key that changes on every restart and differs per replica,
+// breaking token verification and giving a false sense of security.
 
 var (
 	secretMu  sync.Mutex
 	secretKey []byte
 )
 
-// LoadOrGenerateSecret loads the HMAC secret from env or generates one for dev.
+// devModeEnabled reports whether explicit dev mode is on (VULOS_TALK_DEV). It
+// mirrors middleware.devModeEnabled without importing it (avoids coupling this
+// low-level service to the HTTP middleware layer).
+func devModeEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("VULOS_TALK_DEV"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
+// LoadOrGenerateSecret loads the HMAC join-token secret from VULOS_MEET_SECRET.
+// When it is unset it fails closed in production and only mints an ephemeral
+// in-memory key in explicit dev mode (VULOS_TALK_DEV=1).
 func LoadOrGenerateSecret() error {
 	secretMu.Lock()
 	defer secretMu.Unlock()
@@ -154,7 +173,16 @@ func LoadOrGenerateSecret() error {
 		secretKey = decoded
 		return nil
 	}
-	// Dev mode — random in-memory key
+	// No secret configured. Fail closed unless explicit dev mode is on.
+	if !devModeEnabled() {
+		return errors.New(
+			"meeting: VULOS_MEET_SECRET is not set; refusing to mint join tokens with " +
+				"an ephemeral key. Set VULOS_MEET_SECRET to a strong random hex value " +
+				"(≥32 hex chars) in production, or set VULOS_TALK_DEV=1 for local development")
+	}
+	// Dev mode only — random in-memory key (changes per restart).
+	log.Printf("[meeting] VULOS_MEET_SECRET unset; using an EPHEMERAL in-memory " +
+		"join-token key (dev mode). Do NOT use this in production.")
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return fmt.Errorf("meeting: generate dev secret: %w", err)

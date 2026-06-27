@@ -265,8 +265,11 @@ func (h *BotAPIHandler) IncomingWebhook(c *gin.Context) {
 	if channelID == "" {
 		channelID = "general"
 	}
-	if _, exists := h.spaces.store.GetChannel(channelID); !exists {
-		c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
+	// SECURITY: gate the webhook through the SAME channel authz the authenticated
+	// REST path uses. A webhook-id holder must not be able to post into a
+	// private/DM channel the bot is not a member of just because the channel
+	// exists. Public channels remain open; private/DM require bot membership.
+	if !h.requireBotChannel(c, b, channelID) {
 		return
 	}
 	msg, err := h.spaces.store.SendMessage(channelID, b.AccountID(), req.Text, "")

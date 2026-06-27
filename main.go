@@ -6,7 +6,11 @@
 // SPA via //go:embed dist. It runs COMPLETELY STANDALONE — identity is verified
 // against a local JWT secret, entitlements are unlimited (self-host), and usage
 // metering is a no-op (the integration seam). The vulos-cloud control plane is
-// optional and engaged only when VULOS_CP_BASE_URL is set.
+// optional and engaged only when VULOS_CP_BASE_URL is set, in which case the
+// backend/integration/cloud adapter resolves entitlements and reports usage
+// against the cp (mirroring vulos-office). The core never imports that adapter —
+// only this composition root does — so removing it can never break the
+// standalone build.
 //
 // TODO(seam-C): route huddle video through vulos-meet — today Talk hosts its
 // own WebRTC meeting/lobby/TURN backend (carried from office). The product map
@@ -27,6 +31,7 @@ import (
 	"vulos-talk/backend/bots"
 	"vulos-talk/backend/config"
 	"vulos-talk/backend/handlers"
+	"vulos-talk/backend/integration/cloud"
 	"vulos-talk/backend/middleware"
 	"vulos-talk/backend/obs"
 	"vulos-talk/backend/seam"
@@ -85,9 +90,19 @@ func main() {
 	storage.InitOrgBucket()
 
 	// Integration seam: standalone by default; cloud control plane is optional
-	// and wired only when configured. The core never imports the cloud adapter.
+	// and wired only when configured (VULOS_CP_BASE_URL). The core never imports
+	// the cloud adapter — only this composition root does — so deleting the
+	// adapter can never break the standalone build.
 	provider := seam.NewStandaloneProvider(middleware.JWTSecret, cfg.Auth.Enabled)
-	log.Printf("[seam] integration mode: standalone (no control plane)")
+	if cloud.Enabled() {
+		ccfg := cloud.FromEnv()
+		// Identity stays locally-verified (HS256) and is org-stamped; entitlements
+		// and usage are resolved/reported against the control plane.
+		provider = cloud.NewProvider(ccfg, provider.Identity)
+		log.Printf("[seam] integration mode: cloud (control plane %s)", ccfg.BaseURL)
+	} else {
+		log.Printf("[seam] integration mode: standalone (no control plane)")
+	}
 	billing.Configure(provider)
 
 	gin.SetMode(gin.ReleaseMode)

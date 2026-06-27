@@ -204,6 +204,13 @@ func (d *Dispatcher) deliver(b *Bot, ev Event) {
 	}
 	d.fanoutSSE(b.ID, body)
 	if b.EventURL != "" {
+		// SSRF guard at the dispatch boundary: a bot persisted before this guard
+		// existed (or via any path that bypassed create/update validation) must
+		// still never have an event POSTed to a private/loopback/metadata target.
+		if err := ValidateEventURL(b.EventURL); err != nil {
+			log.Printf("[bots] skip event delivery to %s: %v", b.EventURL, err)
+			return
+		}
 		go d.post(b.EventURL, b.SigningSecret, body)
 	}
 }

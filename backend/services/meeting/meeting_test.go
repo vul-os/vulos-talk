@@ -10,6 +10,14 @@ import (
 	"vulos-talk/backend/services/meeting"
 )
 
+// TestMain configures a join-token secret for the whole package: the meeting
+// service now fails closed when VULOS_MEET_SECRET is unset outside dev mode, so
+// the tests provide one exactly as a production deployment would.
+func TestMain(m *testing.M) {
+	os.Setenv("VULOS_MEET_SECRET", strings.Repeat("a", 64)) // 32 bytes hex
+	os.Exit(m.Run())
+}
+
 // ── Test 1: Schedule + lookup ────────────────────────────────────────────────
 
 func TestScheduleAndLookup(t *testing.T) {

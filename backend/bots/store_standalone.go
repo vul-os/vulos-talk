@@ -1,6 +1,7 @@
 package bots
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -151,6 +152,10 @@ func (r *StandaloneRegistry) Create(p CreateParams) (*Created, error) {
 	if err != nil {
 		return nil, err
 	}
+	// SSRF guard (defense-in-depth; handlers also validate before reaching here).
+	if err := ValidateEventURL(p.EventURL); err != nil {
+		return nil, err
+	}
 	token := GenerateToken()
 	secret := GenerateSecret()
 	b := &Bot{
@@ -209,7 +214,11 @@ func (r *StandaloneRegistry) GetByIncomingWebhookID(webhookID string) (*Bot, err
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, b := range r.all {
-		if b.IncomingWebhookID == webhookID {
+		// The incoming-webhook id IS the secret (the unauthenticated hook endpoint
+		// has no other credential), so compare in constant time to avoid leaking
+		// it via timing.
+		if b.IncomingWebhookID != "" &&
+			subtle.ConstantTimeCompare([]byte(b.IncomingWebhookID), []byte(webhookID)) == 1 {
 			return clone(b), nil
 		}
 	}
@@ -250,6 +259,10 @@ func (r *StandaloneRegistry) Update(id string, p UpdateParams) (*Bot, error) {
 		updated.Scopes = scopes
 	}
 	if p.EventURL != nil {
+		// SSRF guard (defense-in-depth; handlers also validate before reaching here).
+		if err := ValidateEventURL(*p.EventURL); err != nil {
+			return nil, err
+		}
 		updated.EventURL = strings.TrimSpace(*p.EventURL)
 	}
 	if p.SlashCommands != nil {

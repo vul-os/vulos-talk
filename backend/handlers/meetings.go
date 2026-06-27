@@ -68,10 +68,12 @@ func (h *MeetingHandler) Create(c *gin.Context) {
 		invitees = []string{}
 	}
 
-	organizerID := req.OrganizerID
-	if organizerID == "" {
-		organizerID = c.GetString("userID")
-	}
+	// SECURITY: the organizer is always derived from the authenticated caller —
+	// never from a client-supplied req.OrganizerID. The organizer gates
+	// Update/Delete, lobby admit, and recording delete, so honoring a client
+	// value would let any caller grant themselves (or impersonate) ownership.
+	// req.OrganizerID is ignored.
+	organizerID := requesterID(c)
 	if organizerID == "" {
 		organizerID = c.ClientIP()
 	}
@@ -146,6 +148,11 @@ func (h *MeetingHandler) List(c *gin.Context) {
 }
 
 // GET /api/meetings/:id
+// Membership-gated: only the organizer, an invitee, or an admin may read the
+// full meeting record (which includes the invitee list). An unauthenticated
+// caller in auth-disabled single-user mode is allowed. External invitees who
+// only hold a bare room link use the public /join endpoint, which does not
+// expose the invitee roster.
 func (h *MeetingHandler) Get(c *gin.Context) {
 	id := c.Param("id")
 	m, err := h.store.GetMeeting(id)
@@ -153,7 +160,30 @@ func (h *MeetingHandler) Get(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "meeting not found"})
 		return
 	}
+	if !canViewMeeting(c, m) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to view this meeting"})
+		return
+	}
 	c.JSON(http.StatusOK, m)
+}
+
+// canViewMeeting reports whether the caller may read the full meeting record.
+// Admins and (in auth-disabled mode) the anonymous local caller always may; an
+// authenticated caller must be the organizer or an invitee.
+func canViewMeeting(c *gin.Context, m *models.Meeting) bool {
+	callerID := c.GetString("userID")
+	if c.GetBool("isAdmin") || callerID == "" {
+		return true
+	}
+	if m.OrganizerID == callerID {
+		return true
+	}
+	for _, inv := range m.Invitees {
+		if inv == callerID {
+			return true
+		}
+	}
+	return false
 }
 
 // PUT /api/meetings/:id  (organizer only)

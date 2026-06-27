@@ -74,6 +74,12 @@ func (h *BotsHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
 		return
 	}
+	// SSRF guard: reject an event_url pointing at a private/loopback/link-local/
+	// metadata target before it is ever stored or dispatched to.
+	if err := bots.ValidateEventURL(req.EventURL); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	created, err := h.reg.Create(bots.CreateParams{
 		Name:           req.Name,
 		OwnerID:        requesterID(c),
@@ -128,6 +134,11 @@ func (h *BotsHandler) Update(c *gin.Context) {
 	}
 	if _, present := raw["event_url"]; present {
 		if s, ok := raw["event_url"].(string); ok {
+			// SSRF guard on update too (see Create).
+			if err := bots.ValidateEventURL(s); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			p.EventURL = &s
 		}
 	}
