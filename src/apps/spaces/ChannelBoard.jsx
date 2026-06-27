@@ -5,20 +5,16 @@
  * channel. One board per channel: boardId === channelId, so everyone viewing a
  * channel's "Board" tab edits the same shared document.
  *
- * Transport — websocket (board sync server), see Step-3 note below.
- * ───────────────────────────────────────────────────────────────────────────
- * TODO(seam): route board collab over @vulos/relay-client.
- *   The intended end-state (per board-ui's own provider.ts note) is for Talk to
- *   own the transport and pump Y.Doc diffs over the Vulos Relay peer-fabric,
- *   the same fabric calls/presence ride on — i.e. a custom Y.Doc provider that:
- *     • outbound: doc.on('update', (u, origin) => { if (origin!=='remote') relaySend(u) })
- *     • inbound:  relay 'message' bytes → Y.applyUpdate(doc, bytes, 'remote')
- *     • late-join: on a new peer, broadcast Y.encodeStateAsUpdate(doc)
- *   That requires standing up a relay FabricClient for a `board:<channelId>`
- *   session (signaling URL + identity/auth + ICE), which Talk does not wire for
- *   channels today (presence is REST-poll; calls use media-only createCall).
- *   Until that fabric path exists, we use the board sync server below, which
- *   gives a fully-working collaborative board now.
+ * Transport — websocket (board sync server). The board ships a fully-working
+ * collaborative transport today via a standalone websocket sync server (see
+ * VITE_BOARD_WS_URL below): boardId === channelId, Y.Doc diffs synced per board.
+ *
+ * Seam note: the @vulos/relay-client peer-fabric is the eventual home for this
+ * transport (a custom Y.Doc provider that pumps doc updates over the same relay
+ * fabric presence rides on, with state-vector exchange on late-join). That path
+ * is deferred — it needs a relay FabricClient per `board:<channelId>` session
+ * (signaling + identity/auth + ICE) which Talk does not wire for channels today
+ * (presence is REST-poll). The websocket transport below is the supported path.
  */
 import { useMemo, useEffect, useState } from 'react'
 import { BoardApp, createBoardDoc, createWebsocketProvider } from '@vulos/board-ui'

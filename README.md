@@ -27,9 +27,9 @@ Vulos Talk is a self-hostable **team chat** application that ships as **one
 self-contained Go binary** with the entire React frontend embedded via
 `//go:embed`. It gives a team real-time **Spaces** (public/private channels and
 DMs), threaded conversations, emoji reactions, pinned messages, full-text
-search, presence, and **huddles** (WebRTC meetings with a lobby, signed join
-tokens, and recordings). Drop the binary next to a `config.yaml` and it runs —
-SQLite by default, no external services, no telemetry.
+search, presence, and **huddles** (handed off to the dedicated **Vulos Meet**
+product via seam-C, embedded in-channel). Drop the binary next to a `config.yaml`
+and it runs — SQLite by default, no external services, no telemetry.
 
 It is **independently self-hostable**: with zero configuration it runs as a
 single-user, local-storage app. Everything that *could* tie it to an external
@@ -56,12 +56,17 @@ and huddles. It runs standalone **and** is surfaced by **Vulos Workspace** as
 the "Talk" app alongside Mail, Office, and Meet. Workspace links/embeds Talk
 through clean seams; products never import one another's code.
 
-> **Roadmap — `TODO(seam-C)`:** Talk currently hosts its own WebRTC
-> meeting/lobby/TURN backend (carried over from Vulos Office). The product map
-> consolidates real-time video into the dedicated **Vulos Meet** product; when
-> that lands, the `/meetings` + `/meet` + `/turn` surface here will be replaced
-> by a seam-C handoff to vulos-meet, leaving Talk focused on chat + Spaces.
-> This is a documented future seam — no cross-repo dependency exists today.
+> **Seam-C (real-time video):** Talk hosts **no** audio/video itself. Starting a
+> huddle in a channel hands off to the dedicated **Vulos Meet** product — Talk
+> derives a deterministic Meet room from the channel, mints a `VULOS-MEET/1` join
+> token (locally with the shared key/secret, or brokered via the control plane),
+> and embeds the Meet web client in an iframe, with Meet's in-call chat pointed
+> back at the originating Talk channel so the conversation persists. Meet is an
+> **optional** dependency: with no Meet configured the Huddle action shows a
+> "video not configured" state and Talk standalone (chat + Spaces) is fully
+> functional. Configure via `VULOS_MEET_URL` + `VULOS_MEET_API_KEY` /
+> `VULOS_MEET_API_SECRET` (or `VULOS_CP_BASE_URL` to broker). See
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Features
 
@@ -84,8 +89,10 @@ through clean seams; products never import one another's code.
   [docs/BOT-API.md](docs/BOT-API.md).
 - **Search** — SQLite FTS5 full-text search within a channel.
 - **Presence** — online/away/DND with custom status (REST/poll heartbeat + roster).
-- **Huddles** — WebRTC meetings with a lobby, organizer-only admit/deny,
-  short-lived signed join tokens, TURN/ICE credentials, and recordings.
+- **Huddles** — seam-C handoff to the dedicated **Vulos Meet** product: a
+  per-channel Meet room with a minted `VULOS-MEET/1` join token, embedded in an
+  iframe with Meet's in-call chat persisted back to the channel. Optional —
+  disabled with a "video not configured" state when no Meet is set.
 - **Responsive + a11y** — single-column mobile layout with a channel drawer,
   bottom nav, and full-screen composer; no horizontal scroll at 360px; ≥44px taps.
 - **Single binary** — Go backend + embedded React SPA; SQLite by default,
@@ -169,9 +176,8 @@ npm run dev:web   # Vite on :5175 proxying /api → :8080
                 │   ├── /api/bots          bot/app admin (create · rotate · scopes · webhooks)      │
                 │   ├── /api/bot/v1/*      bot REST API (Bearer bot-token) + SSE event stream       │
                 │   ├── /api/bot/hooks/*   per-bot incoming webhooks  ──▶  bots.Registry (seam)     │
-                │   ├── /api/meetings/*    huddle rooms (CRUD)                  (SQLite)            │
-                │   ├── /api/meet/*        lobby · signed join tokens · admit/deny · recordings    │
-                │   ├── /api/turn/*        short-lived TURN/ICE credentials                        │
+                │   ├── /api/meet/config   whether Vulos Meet is configured                       │
+                │   ├── …/channels/:id/huddle  seam-C: mint VULOS-MEET/1 join → Vulos Meet        │
                 │   ├── /metrics /version  Prometheus + build info                                 │
                 │   └── //go:embed dist    serves the built React SPA (history-API fallback)       │
                 │                                                                                   │
@@ -180,7 +186,7 @@ npm run dev:web   # Vite on :5175 proxying /api → :8080
                 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Full detail and the `TODO(seam-C)` huddle/video plan: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Full detail and the seam-C huddle/video handoff: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Bots & apps
 
@@ -215,8 +221,9 @@ Full reference: **[docs/BOT-API.md](docs/BOT-API.md)**.
 ## Configuration
 
 Talk is configured via `config.yaml` plus a few environment variables (JWT
-secret, lobby DB path, CORS allowlist, optional cloud base URL). See
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete reference.
+secret, CORS allowlist, optional `VULOS_MEET_*` huddle handoff, optional cloud
+base URL). See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete
+reference.
 
 Talk does not host its own login UI: the `RequireAuth` boundary redirects an
 unauthenticated user to the central identity surface (`app.vulos.org/login`) and

@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Seam-C: huddles → Vulos Meet.** Talk no longer hosts real-time audio/video.
+  Starting a huddle in a channel derives a deterministic Meet room, mints a
+  `VULOS-MEET/1` join token (locally via `VULOS_MEET_API_KEY`/`VULOS_MEET_API_SECRET`,
+  or brokered via `VULOS_CP_BASE_URL`), and embeds the Vulos Meet web client in an
+  iframe (`HuddlePanel`) — with Meet's in-call chat pointed back at the originating
+  channel (`talkChannel`/`talkBase`/`talkToken`) so the conversation persists.
+  New endpoints `GET /api/meet/config` and `POST /api/spaces/channels/:id/huddle`
+  (membership-checked). Meet is an **optional** dependency: with `VULOS_MEET_URL`
+  unset the Huddle action degrades to a "video not configured" state and Talk
+  standalone (chat + Spaces) is fully functional.
 - **Slack/Google-Chat-class UI** — reshaped the Spaces experience into a
   three-pane desktop layout (sidebar · stream · thread) with a workspace header,
   prominent compose, ⌘K quick-switcher, collapsible Channels / DMs / Threads /
@@ -41,8 +51,8 @@ own product and conformed to the VulOS product standard.
 - **Spaces** — public/private channels and DMs backed by a durable CRDT message
   store (SQLite): messages, threads, reactions, pins, status, presence.
 - Per-channel SQLite FTS5 full-text search.
-- **Huddles** — WebRTC meetings with a lobby, organizer-only admit/deny,
-  short-lived signed join tokens, TURN/ICE credentials, and recordings.
+- **Huddles** — hand off to the dedicated Vulos Meet product (seam-C; see the
+  Added entry at the top of Unreleased).
 - Integration seam (Identity / Entitlements / Usage) with standalone defaults;
   optional vulos-cloud control plane engaged only when configured.
 - Playwright demo screenshotter (`npm run screenshots`) with zero-setup seeded
@@ -56,6 +66,13 @@ own product and conformed to the VulOS product standard.
 - The huddles surface is now labelled **Huddles** (was "Meet") to avoid
   collision with the separate Vulos Meet product.
 
+### Removed
+- Talk's carried-over real-time video backend: the in-process WebRTC mesh,
+  meeting lobby, TURN/ICE credential issuance, recordings, and the
+  `/api/meetings`, `/api/meet/*`, and `/api/turn/*` endpoints (with their
+  `services/meeting` lobby/token/turn code and the meeting/recording storage).
+  Real-time A/V now lives in the dedicated Vulos Meet product (seam-C above).
+
 ### Fixed
 - Spaces routing: `SpacesApp` now reads the `:id` route param and navigates to
   the `/channels/:id` and `/dm/:id` routes declared by `TalkShell` (the previous
@@ -63,5 +80,5 @@ own product and conformed to the VulOS product standard.
   channel on the bare route no longer rewrites the URL.
 
 ### Roadmap
-- `TODO(seam-C)`: route huddle video through the dedicated **Vulos Meet**
-  product. No cross-repo dependency exists today.
+- Seam-C huddle video → **Vulos Meet** is implemented (see Added/Removed above).
+  Meet remains an optional dependency; no hard cross-repo dependency exists.

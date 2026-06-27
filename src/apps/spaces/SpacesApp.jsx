@@ -17,7 +17,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Hash, Lock, AtSign, Plus, Users, Search, ChevronDown, ChevronRight,
-  Pencil, MessageSquare, Bell, Bot, HelpCircle, X, Menu, Home, User, Video,
+  Pencil, MessageSquare, Bell, Bot, HelpCircle, X, Menu, Home, User,
 } from 'lucide-react'
 import ChannelView from './ChannelView.jsx'
 import ActivityView from './ActivityView.jsx'
@@ -515,7 +515,6 @@ function WorkspaceRail({ view, activeChat, mentions, onHome, onActivity, navigat
       <div className="flex flex-col w-full">
         <RailButton icon={Home} label="Channels" active={view === 'chat' && activeChat} onClick={onHome} />
         <RailButton icon={Bell} label="Activity" active={view === 'activity'} badge={mentions} onClick={onActivity} />
-        <RailButton icon={Video} label="Huddles" onClick={() => navigate('/meet/dashboard')} />
         <RailButton icon={Bot} label="Apps & Bots" onClick={() => navigate('/apps')} />
       </div>
 

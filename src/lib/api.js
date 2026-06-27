@@ -209,6 +209,14 @@ export const api = {
       body: JSON.stringify({ body }),
     }),
 
+  // Seam-C huddles → vulos-meet. meetConfig reports whether video is configured
+  // (the Huddle action is disabled otherwise). startHuddle mints a per-channel
+  // Meet join and returns { enabled, join_url, ... } the SPA embeds in an iframe
+  // with Talk-backed in-call chat.
+  meetConfig: () => request('/meet/config'),
+  startHuddle: (channelId) =>
+    request(`/spaces/channels/${channelId}/huddle`, { method: 'POST' }),
+
   // Admin: invite-token issuance + audit log (admin scope required; non-admins
   // receive 403).
   adminMintInvite: ({ note = '', maxUses = 1, ttlHours = 168 } = {}) =>
