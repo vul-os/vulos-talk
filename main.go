@@ -28,7 +28,6 @@ import (
 	"strings"
 
 	"vulos-talk/backend/billing"
-	"vulos-talk/backend/bots"
 	"vulos-talk/backend/config"
 	"vulos-talk/backend/handlers"
 	"vulos-talk/backend/integration/cloud"
@@ -40,6 +39,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/vul-os/vulos-apps/appsplatform"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=vX.Y.Z".
@@ -212,32 +212,69 @@ func main() {
 	protected.POST("/spaces/channels/:channelId/threads/:parentId/reply", spacesHandler.ReplyThread)
 
 	// -----------------------------------------------------------------------
-	// Bot framework: registry (the seam), dispatcher, admin API, bot REST API,
-	// incoming webhooks, and the SSE event stream.
+	// Apps & Bots platform: the shared @vulos/apps platform Talk now hosts as
+	// its "apps & bots place" — registry (the seam), dispatcher, the Talk
+	// ProductAdapter, the management API (GET /api/apps, the consolidation
+	// contract Vulos Workspace reads), the runtime app-token API, slash
+	// commands, incoming webhooks, and the SSE event stream. It generalizes
+	// Talk's original bespoke bot framework; the legacy /api/bot/v1 + /api/bots
+	// surface is kept as a compat shim over the SAME registry.
 	//
-	// The standalone registry lives in-repo (SQLite, env-configurable DSN). A
-	// Vulos Cloud control plane would implement the same bots.Registry in a
-	// separate package wired only here — the core never imports it.
+	// Open-core seam: the standalone registry (pure-Go SQLite, env DSN) is the
+	// default. A Vulos Cloud apps control plane would implement the SAME
+	// appsplatform.Registry in a separate package wired ONLY here and ONLY when
+	// explicitly selected (env-gated) — the core never imports it, mirroring the
+	// integration seam above.
 	// -----------------------------------------------------------------------
-	botsDSN := os.Getenv("VULOS_BOTS_DB")
-	if botsDSN == "" {
-		botsDSN = cfg.Server.DataDir + "/bots.db"
+	appsDSN := os.Getenv("VULOS_APPS_DB")
+	if appsDSN == "" {
+		appsDSN = os.Getenv("VULOS_BOTS_DB") // back-compat with the pre-migration env var
 	}
-	var botRegistry bots.Registry
-	if reg, err := bots.NewStandaloneRegistry(botsDSN); err != nil {
-		log.Printf("bots: durable registry unavailable (%v); using in-memory registry", err)
-		botRegistry = bots.NewMemoryRegistry()
+	if appsDSN == "" {
+		appsDSN = cfg.Server.DataDir + "/apps.db"
+	}
+	if useCloudAppsRegistry() {
+		// Env-gated cloud control-plane hook. No cloud apps registry is compiled
+		// into this build, so we log and fall back to standalone rather than
+		// importing a cloud package into the core. A deployment that wants the
+		// cloud developer console wires `reg = cloudapps.New(...)` right here.
+		log.Printf("[apps] cloud apps registry requested (VULOS_APPS_CLOUD) but not compiled in; using standalone")
+	}
+	var appsRegistry appsplatform.Registry
+	if reg, err := appsplatform.NewStandaloneRegistry(appsDSN); err != nil {
+		log.Printf("apps: durable registry unavailable (%v); using in-memory registry", err)
+		appsRegistry = appsplatform.NewMemoryRegistry()
 	} else {
-		botRegistry = reg
-		log.Printf("Bot registry → %s", botsDSN)
+		appsRegistry = reg
+		log.Printf("Apps registry → %s", appsDSN)
 	}
 
-	dispatcher := bots.NewDispatcher(botRegistry, spacesHandler.Store())
+	appsDispatcher := appsplatform.NewDispatcher(appsRegistry, appsplatform.ProductTalk)
+	talkAdapter := handlers.NewTalkAdapter(spacesHandler)
+	appsSink := handlers.NewAppsSink(appsRegistry, appsDispatcher, talkAdapter)
 	// Hook the dispatcher into the send/reply/join path and slash-command dispatch.
-	spacesHandler.SetBotSink(dispatcher)
+	spacesHandler.SetBotSink(appsSink)
 
-	// Admin API (session-authed, owner-scoped).
-	botsHandler := handlers.NewBotsHandler(botRegistry)
+	// New canonical surface: the platform's mountable handler set. Management is
+	// authed by Talk's OWN session (AppsAdminAuth); runtime by Bearer app token.
+	appsHandler, err := appsplatform.NewHandler(appsplatform.MountConfig{
+		Adapter:    talkAdapter,
+		Registry:   appsRegistry,
+		Dispatcher: appsDispatcher,
+		Admin:      middleware.AppsAdminAuth(cfg),
+		BasePath:   "/api/apps",
+	})
+	if err != nil {
+		log.Fatalf("apps platform mount failed: %v", err)
+	}
+	// Mount the raw net/http handler at the base + its subtree (the platform owns
+	// its own auth, so it is not behind the gin protected group).
+	r.Any("/api/apps", gin.WrapH(appsHandler))
+	r.Any("/api/apps/*any", gin.WrapH(appsHandler))
+
+	// Legacy admin API (session-authed, owner-scoped) — COMPAT shim over the
+	// same registry; the canonical surface is /api/apps.
+	botsHandler := handlers.NewBotsHandler(appsRegistry)
 	protected.GET("/bots", botsHandler.List)
 	protected.POST("/bots", botsHandler.Create)
 	protected.GET("/bots/:id", botsHandler.Get)
@@ -248,10 +285,11 @@ func main() {
 	// Slash-command catalog for the composer autocomplete (session-authed).
 	protected.GET("/spaces/commands", botsHandler.Commands)
 
-	// Bot REST API (Bearer bot-token authed).
-	botAPIHandler := handlers.NewBotAPIHandler(spacesHandler, botRegistry, dispatcher)
+	// Legacy bot REST API (Bearer app-token authed) — COMPAT shim so the
+	// published BOT-API + the echo-bot example keep working.
+	botAPIHandler := handlers.NewBotAPIHandler(spacesHandler, appsRegistry, appsSink)
 	botV1 := api.Group("/bot/v1")
-	botV1.Use(middleware.BotAuth(botRegistry))
+	botV1.Use(middleware.BotAuth(appsRegistry))
 	botV1.GET("/auth.test", botAPIHandler.AuthTest)
 	botV1.POST("/messages", botAPIHandler.PostMessage)
 	botV1.GET("/channels", botAPIHandler.ListChannels)
@@ -260,7 +298,7 @@ func main() {
 	botV1.POST("/reactions", botAPIHandler.AddReaction)
 	botV1.DELETE("/reactions", botAPIHandler.RemoveReaction)
 	// Socket-mode style SSE event stream.
-	botEventsHandler := handlers.NewBotEventsHandler(dispatcher)
+	botEventsHandler := handlers.NewBotEventsHandler(appsDispatcher)
 	botV1.GET("/events", botEventsHandler.Stream)
 
 	// Incoming webhooks: NO auth header — the webhook id in the path is the secret.
@@ -290,5 +328,18 @@ func main() {
 	log.Printf("Vulos Talk running → http://localhost%s", addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// useCloudAppsRegistry reports whether the operator asked to broker apps through
+// a Vulos Cloud control plane (env-gated). The open-core seam: the core never
+// imports a cloud apps package; only this composition root would wire one when
+// this returns true.
+func useCloudAppsRegistry() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("VULOS_APPS_CLOUD"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
 	}
 }

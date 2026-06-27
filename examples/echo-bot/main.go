@@ -34,11 +34,11 @@ import (
 	"time"
 )
 
-// event mirrors the Talk outbound event envelope.
+// event mirrors the Talk outbound event envelope (Vulos Apps & Bots platform).
 type event struct {
 	Type      string                 `json:"type"`
-	BotID     string                 `json:"bot_id"`
-	Team      string                 `json:"team"`
+	AppID     string                 `json:"app_id"`
+	Product   string                 `json:"product"`
 	Event     map[string]interface{} `json:"event"`
 	EventTime int64                  `json:"event_time"`
 }

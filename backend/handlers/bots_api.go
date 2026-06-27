@@ -5,31 +5,33 @@ import (
 	"strconv"
 	"strings"
 
-	"vulos-talk/backend/bots"
 	"vulos-talk/backend/middleware"
 	"vulos-talk/backend/models"
 
 	"github.com/gin-gonic/gin"
+	"github.com/vul-os/vulos-apps/appsplatform"
 )
 
-// BotAPIHandler serves the Bearer-bot-token API at /api/bot/v1 plus the
-// unauthenticated incoming-webhook endpoint. It reuses the spaces store for
-// posting/reading and the dispatcher (BotSink) to fan new bot messages out as
-// events.
+// BotAPIHandler serves the legacy Bearer-app-token API at /api/bot/v1 plus the
+// unauthenticated incoming-webhook endpoint. It is a COMPAT SHIM kept so the
+// published BOT-API and the echo-bot example keep working after the migration to
+// the shared Apps & Bots platform: it is backed by the SAME appsplatform
+// registry as the new /api/apps surface, so a bot created via either place is
+// one app. Apps post/act as the synthetic account "app:<id>".
 type BotAPIHandler struct {
 	spaces *SpacesHandlerExt
-	reg    bots.Registry
+	reg    appsplatform.Registry
 	sink   BotSink // dispatcher; may be nil
 }
 
 // NewBotAPIHandler wires the bot API over the shared spaces handler + registry.
 // sink (the dispatcher) is optional; when set, bot-posted messages emit events.
-func NewBotAPIHandler(spaces *SpacesHandlerExt, reg bots.Registry, sink BotSink) *BotAPIHandler {
+func NewBotAPIHandler(spaces *SpacesHandlerExt, reg appsplatform.Registry, sink BotSink) *BotAPIHandler {
 	return &BotAPIHandler{spaces: spaces, reg: reg, sink: sink}
 }
 
 // requireScope enforces a scope, writing 403 and returning false on miss.
-func requireScope(c *gin.Context, b *bots.Bot, scope string) bool {
+func requireScope(c *gin.Context, b *appsplatform.App, scope string) bool {
 	if !b.HasScope(scope) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "missing required scope: " + scope})
 		return false
@@ -37,8 +39,8 @@ func requireScope(c *gin.Context, b *bots.Bot, scope string) bool {
 	return true
 }
 
-// botFrom returns the authenticated bot or writes 401.
-func botFrom(c *gin.Context) (*bots.Bot, bool) {
+// botFrom returns the authenticated app or writes 401.
+func botFrom(c *gin.Context) (*appsplatform.App, bool) {
 	b, ok := middleware.BotFromContext(c)
 	if !ok || b == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "bot not authenticated"})
@@ -47,9 +49,9 @@ func botFrom(c *gin.Context) (*bots.Bot, bool) {
 	return b, true
 }
 
-// requireBotChannel enforces a bot's access to a channel (public OK; private/DM
-// require the bot to be a member). Writes 404/403 and returns false on denial.
-func (h *BotAPIHandler) requireBotChannel(c *gin.Context, b *bots.Bot, channelID string) bool {
+// requireBotChannel enforces an app's access to a channel (public OK; private/DM
+// require the app to be a member). Writes 404/403 and returns false on denial.
+func (h *BotAPIHandler) requireBotChannel(c *gin.Context, b *appsplatform.App, channelID string) bool {
 	allowed, exists := h.spaces.canAccessChannel(channelID, b.AccountID())
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
@@ -81,7 +83,7 @@ func (h *BotAPIHandler) PostMessage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !requireScope(c, b, bots.ScopeChatWrite) {
+	if !requireScope(c, b, appsplatform.ScopeChatWrite) {
 		return
 	}
 	var req struct {
@@ -118,7 +120,7 @@ func (h *BotAPIHandler) ListChannels(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !requireScope(c, b, bots.ScopeChannelsRead) {
+	if !requireScope(c, b, appsplatform.ScopeChannelsRead) {
 		return
 	}
 	out := make([]*models.Channel, 0)
@@ -141,7 +143,7 @@ func (h *BotAPIHandler) History(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !requireScope(c, b, bots.ScopeHistoryRead) {
+	if !requireScope(c, b, appsplatform.ScopeHistoryRead) {
 		return
 	}
 	channelID := c.Param("channelId")
@@ -173,7 +175,7 @@ func (h *BotAPIHandler) Members(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !requireScope(c, b, bots.ScopeMembersRead) {
+	if !requireScope(c, b, appsplatform.ScopeMembersRead) {
 		return
 	}
 	channelID := c.Param("channelId")
@@ -209,7 +211,7 @@ func (h *BotAPIHandler) reaction(c *gin.Context, add bool) {
 	if !ok {
 		return
 	}
-	if !requireScope(c, b, bots.ScopeReactionsWrite) {
+	if !requireScope(c, b, appsplatform.ScopeReactionsWrite) {
 		return
 	}
 	var req reactionBody
@@ -237,12 +239,12 @@ func (h *BotAPIHandler) reaction(c *gin.Context, add bool) {
 }
 
 // IncomingWebhook POST /api/bot/hooks/:webhookId — unauthenticated (the id is
-// the secret). Posts text to channel_id (or the bot's default channel, or
-// "general") as the bot. 404 when the webhook id is unknown.
+// the secret). Posts text to channel_id (or the app's default target, or
+// "general") as the app. 404 when the webhook id is unknown or disabled.
 func (h *BotAPIHandler) IncomingWebhook(c *gin.Context) {
 	webhookID := c.Param("webhookId")
 	b, err := h.reg.GetByIncomingWebhookID(webhookID)
-	if err != nil || b == nil {
+	if err != nil || b == nil || !b.TargetsProduct(appsplatform.ProductTalk) || !b.Incoming.Enabled {
 		c.JSON(http.StatusNotFound, gin.H{"error": "unknown webhook"})
 		return
 	}
@@ -260,15 +262,15 @@ func (h *BotAPIHandler) IncomingWebhook(c *gin.Context) {
 	}
 	channelID := strings.TrimSpace(req.ChannelID)
 	if channelID == "" {
-		channelID = b.DefaultChannel
+		channelID = b.DefaultTarget
 	}
 	if channelID == "" {
 		channelID = "general"
 	}
 	// SECURITY: gate the webhook through the SAME channel authz the authenticated
 	// REST path uses. A webhook-id holder must not be able to post into a
-	// private/DM channel the bot is not a member of just because the channel
-	// exists. Public channels remain open; private/DM require bot membership.
+	// private/DM channel the app is not a member of just because the channel
+	// exists. Public channels remain open; private/DM require app membership.
 	if !h.requireBotChannel(c, b, channelID) {
 		return
 	}

@@ -1,5 +1,16 @@
 # Vulos Talk — Bot Framework & API
 
+> **Migration note.** Talk's bots now run on the **shared Vulos Apps & Bots
+> platform** (`github.com/vul-os/vulos-apps`, package `appsplatform`). A bot **is
+> an app**. The new canonical management + runtime surface is **`/api/apps`**
+> (see `vulos-apps/docs/APPS-PLATFORM.md`) — and it is the contract **Vulos
+> Workspace** aggregates via `GET /api/apps`. The legacy surface documented
+> below (`/api/bots`, `/api/bot/v1`, `/api/bot/hooks/:id`) is preserved as a
+> **compatibility shim over the same registry**, so existing bots and the
+> `examples/echo-bot` keep working unchanged. What changed in substance: app
+> tokens are now prefixed **`vat_`** (signing secrets **`vas_`**) and a bot
+> posts/acts as the synthetic account **`app:<id>`** (was `bot:<id>`).
+
 This document describes the Vulos Talk bot/app framework: how to register a bot,
 authenticate, call the REST API, receive signed outbound events, register slash
 commands, post via incoming webhooks, and consume the socket-mode-style SSE
@@ -16,7 +27,7 @@ A **bot** (a.k.a. app) has:
 
 | Field                 | Meaning                                                              |
 | --------------------- | ------------------------------------------------------------------- |
-| `id`                  | Server-assigned id. The bot posts/acts as account `bot:<id>`.       |
+| `id`                  | Server-assigned id. The bot posts/acts as account `app:<id>`.       |
 | `name`                | Display name. Used for `@name` mentions.                            |
 | `owner_id`            | The account that created the bot (admin API is owner-scoped).       |
 | `org_id`              | Tenant id. Empty in OSS / standalone.                              |
@@ -28,10 +39,10 @@ A **bot** (a.k.a. app) has:
 
 ### Secrets
 
-- **Bot token** — a Bearer secret (prefix `vbt_`). **Only its sha256 hash is
+- **Bot token** — a Bearer secret (prefix `vat_`). **Only its sha256 hash is
   stored at rest.** The plaintext is shown **once** at create / rotate time and
   can never be recovered — rotate to get a new one.
-- **Signing secret** — used to sign outbound events (prefix `vbs_`). It is
+- **Signing secret** — used to sign outbound events (prefix `vas_`). It is
   stored **as-is** (not hashed) because Talk must reproduce it to compute the
   HMAC on every outbound event. Treat the bot record as sensitive at rest.
 
@@ -52,9 +63,9 @@ rejected at create/update time.
 
 - **Public** channels: any bot may read and post.
 - **Private / DM** channels: the bot must be a **member** (membership account id
-  `bot:<id>`). Otherwise reads/posts return **403**, and the channel is not
+  `app:<id>`). Otherwise reads/posts return **403**, and the channel is not
   delivered in events. Add a bot to a private channel via the normal Spaces
-  member-invite flow using account id `bot:<id>`.
+  member-invite flow using account id `app:<id>`.
 
 ---
 
@@ -105,7 +116,7 @@ command for the composer autocomplete:
 Base: `/api/bot/v1`. Authenticate with the **bot token**:
 
 ```
-Authorization: Bearer vbt_xxxxxxxx…
+Authorization: Bearer vat_xxxxxxxx…
 ```
 
 `BotAuth` looks the token up by its sha256 hash; an unknown/missing token →
@@ -114,11 +125,11 @@ Authorization: Bearer vbt_xxxxxxxx…
 | Method & path                                  | Scope             | Notes                                                              |
 | ---------------------------------------------- | ----------------- | ----------------------------------------------------------------- |
 | `GET /api/bot/v1/auth.test`                    | none              | `{bot_id, name, scopes}`                                          |
-| `POST /api/bot/v1/messages`                    | `chat:write`      | Body `{channel_id, text, thread_parent?}` → the created message. Author = `bot:<id>`. Channel-access enforced. |
+| `POST /api/bot/v1/messages`                    | `chat:write`      | Body `{channel_id, text, thread_parent?}` → the created message. Author = `app:<id>`. Channel-access enforced. |
 | `GET /api/bot/v1/channels`                     | `channels:read`   | Public channels + private/DM channels the bot is a member of.    |
 | `GET /api/bot/v1/channels/:channelId/history`  | `history:read`    | `?limit=N` (default 50, cap 200); most-recent N, chronological.  |
 | `GET /api/bot/v1/channels/:channelId/members`  | `members:read`    | `[Membership]`. Channel-access enforced.                         |
-| `POST /api/bot/v1/reactions`                   | `reactions:write` | Body `{channel_id, message_id, emoji}` → adds reaction `bot:<id>`.|
+| `POST /api/bot/v1/reactions`                   | `reactions:write` | Body `{channel_id, message_id, emoji}` → adds reaction `app:<id>`.|
 | `DELETE /api/bot/v1/reactions`                 | `reactions:write` | Same body → removes it.                                           |
 | `GET /api/bot/v1/events`                       | none              | SSE event stream (see below).                                     |
 
@@ -134,7 +145,7 @@ URL is itself the secret. Body:
 ```
 
 `channel_id` is optional: it falls back to the bot's `default_channel`, then to
-`general`. The message is posted as `bot:<id>`. Unknown webhook id → `404`.
+`general`. The message is posted as `app:<id>`. Unknown webhook id → `404`.
 
 ```bash
 curl -X POST http://localhost:8080/api/bot/hooks/$WEBHOOK_ID \
@@ -194,11 +205,15 @@ A complete, dependency-free verifier + echo bot lives in
 
 ### Event envelope
 
+After the platform migration the envelope carries `app_id` + `product` (the old
+`bot_id` + `team` fields are gone — a consumer that read only `type` + `event`,
+like the example echo-bot, is unaffected):
+
 ```json
 {
   "type": "app_mention",
-  "bot_id": "…",
-  "team": "vulos",
+  "app_id": "…",
+  "product": "talk",
   "event": { /* per-type payload */ },
   "event_time": 1700000000
 }
@@ -209,7 +224,7 @@ A complete, dependency-free verifier + echo bot lives in
 | `type`            | `event` payload                                                         | Delivered when                                                            |
 | ----------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `message.created` | `{channel_id, message_id, author_id, text, thread_parent}`            | A new top-level/thread message in a channel the bot can see. A bot never receives its **own** messages. |
-| `app_mention`     | same as `message.created`                                              | The message text mentions the bot (`@<name>` or `<@bot:<id>>`).          |
+| `app_mention`     | same as `message.created`                                              | The message text mentions the bot (`@<name>` or `<@app:<id>>`).          |
 | `member_joined`   | `{channel_id, account_id}`                                            | Someone joins a channel the bot is in.                                    |
 | `slash_command`   | `{command, text, channel_id, user_id}`                               | A user invokes a slash command the bot registered (see below).           |
 
@@ -239,7 +254,7 @@ For bots behind NAT (no public `event_url`), open:
 
 ```
 GET /api/bot/v1/events
-Authorization: Bearer vbt_…
+Authorization: Bearer vat_…
 ```
 
 The response is `text/event-stream`. Talk pushes the **same event JSON objects**
@@ -250,7 +265,7 @@ falls behind simply drops events (the stream never blocks delivery to others).
 
 ```bash
 curl -N http://localhost:8080/api/bot/v1/events -H "Authorization: Bearer $TOKEN"
-# data: {"type":"app_mention","bot_id":"…","team":"vulos","event":{…},"event_time":…}
+# data: {"type":"app_mention","app_id":"…","product":"talk","event":{…},"event_time":…}
 ```
 
 ---

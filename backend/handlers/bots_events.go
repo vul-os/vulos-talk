@@ -4,26 +4,25 @@ import (
 	"io"
 	"net/http"
 
-	"vulos-talk/backend/bots"
-
 	"github.com/gin-gonic/gin"
+	"github.com/vul-os/vulos-apps/appsplatform"
 )
 
 // BotEventsHandler serves the socket-mode-style SSE event stream at
-// GET /api/bot/v1/events (BotAuth). It subscribes the calling bot to the
-// dispatcher and streams the SAME signed event JSON objects (here unsigned over
+// GET /api/bot/v1/events (BotAuth). It subscribes the calling app to the shared
+// platform dispatcher and streams the SAME event JSON objects (here unsigned over
 // the already-authenticated TLS channel) as they occur, cleaning up the
-// subscription on disconnect.
+// subscription on disconnect. COMPAT alias of /api/apps/v1/events.
 type BotEventsHandler struct {
-	disp *bots.Dispatcher
+	disp *appsplatform.Dispatcher
 }
 
 // NewBotEventsHandler builds the SSE handler over the dispatcher.
-func NewBotEventsHandler(disp *bots.Dispatcher) *BotEventsHandler {
+func NewBotEventsHandler(disp *appsplatform.Dispatcher) *BotEventsHandler {
 	return &BotEventsHandler{disp: disp}
 }
 
-// Stream GET /api/bot/v1/events — text/event-stream of this bot's events.
+// Stream GET /api/bot/v1/events — text/event-stream of this app's events.
 func (h *BotEventsHandler) Stream(c *gin.Context) {
 	b, ok := botFrom(c)
 	if !ok {

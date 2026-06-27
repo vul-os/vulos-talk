@@ -10,6 +10,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
+	github.com/vul-os/vulos-apps v0.0.0-00010101000000-000000000000
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0
 	go.opentelemetry.io/otel/sdk v1.43.0
@@ -17,6 +18,11 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.1
 )
+
+// The shared Apps & Bots platform lives in the sibling repo; Talk consumes it
+// from the local checkout. Only this composition root + the apps adapter import
+// it; the core stays buildable without any cloud package.
+replace github.com/vul-os/vulos-apps => ../vulos-apps
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

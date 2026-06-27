@@ -4,16 +4,16 @@ import (
 	"net/http"
 	"testing"
 
-	"vulos-talk/backend/bots"
 	"vulos-talk/backend/middleware"
 	"vulos-talk/backend/models"
 
 	"github.com/gin-gonic/gin"
+	"github.com/vul-os/vulos-apps/appsplatform"
 )
 
 // adminRouter wires the bots admin API behind a fake session-auth middleware
 // that injects the given verified user / admin flag.
-func adminRouter(reg bots.Registry, user string, admin bool) *gin.Engine {
+func adminRouter(reg appsplatform.Registry, user string, admin bool) *gin.Engine {
 	h := NewBotsHandler(reg)
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
@@ -34,7 +34,7 @@ func adminRouter(reg bots.Registry, user string, admin bool) *gin.Engine {
 }
 
 func TestAdminOwnerScoping(t *testing.T) {
-	reg := bots.NewMemoryRegistry()
+	reg := appsplatform.NewMemoryRegistry()
 
 	// alice creates a bot through the API.
 	ra := adminRouter(reg, "alice", false)
@@ -46,8 +46,8 @@ func TestAdminOwnerScoping(t *testing.T) {
 		t.Fatalf("create: expected 201, got %d (%s)", w.Code, w.Body.String())
 	}
 	var created struct {
-		Bot   bots.Summary `json:"bot"`
-		Token string       `json:"token"`
+		Bot   botSummary `json:"bot"`
+		Token string     `json:"token"`
 	}
 	mustDecode(t, w, &created)
 	if created.Token == "" || created.Bot.ID == "" {
@@ -72,7 +72,7 @@ func TestAdminOwnerScoping(t *testing.T) {
 
 	// bob's list does not include alice's bot.
 	w = doReq(rb, http.MethodGet, "/api/bots", nil)
-	var bobList []bots.Summary
+	var bobList []botSummary
 	mustDecode(t, w, &bobList)
 	if len(bobList) != 0 {
 		t.Fatalf("bob should see 0 bots, got %d", len(bobList))
@@ -86,7 +86,7 @@ func TestAdminOwnerScoping(t *testing.T) {
 	// an admin sees everyone's bots.
 	radmin := adminRouter(reg, "carol", true)
 	w = doReq(radmin, http.MethodGet, "/api/bots", nil)
-	var adminList []bots.Summary
+	var adminList []botSummary
 	mustDecode(t, w, &adminList)
 	if len(adminList) != 1 {
 		t.Fatalf("admin should see all bots, got %d", len(adminList))
@@ -98,14 +98,14 @@ func TestAdminOwnerScoping(t *testing.T) {
 }
 
 func TestCreateBotResponseHasNoStoredSecrets(t *testing.T) {
-	reg := bots.NewMemoryRegistry()
+	reg := appsplatform.NewMemoryRegistry()
 	ra := adminRouter(reg, "alice", false)
 	w := doReq(ra, http.MethodPost, "/api/bots", map[string]interface{}{"name": "b"})
 	var created struct {
-		Bot                bots.Summary `json:"bot"`
-		Token              string       `json:"token"`
-		SigningSecret      string       `json:"signing_secret"`
-		IncomingWebhookURL string       `json:"incoming_webhook_url"`
+		Bot                botSummary `json:"bot"`
+		Token              string     `json:"token"`
+		SigningSecret      string     `json:"signing_secret"`
+		IncomingWebhookURL string     `json:"incoming_webhook_url"`
 	}
 	mustDecode(t, w, &created)
 	if created.SigningSecret == "" || created.IncomingWebhookURL == "" {
@@ -113,7 +113,7 @@ func TestCreateBotResponseHasNoStoredSecrets(t *testing.T) {
 	}
 	// Stored token is only a hash, never the plaintext.
 	stored, _ := reg.Get(created.Bot.ID)
-	if stored.TokenHash == created.Token || stored.TokenHash != bots.HashToken(created.Token) {
+	if stored.TokenHash == created.Token || stored.TokenHash != appsplatform.HashToken(created.Token) {
 		t.Fatalf("token stored incorrectly (must be sha256 hash)")
 	}
 }
@@ -123,10 +123,16 @@ func TestCreateBotResponseHasNoStoredSecrets(t *testing.T) {
 // normally.
 func TestSlashDispatchInterceptsRegisteredCommand(t *testing.T) {
 	sp := testHandler(t)
-	reg := bots.NewMemoryRegistry()
-	_, _ = reg.Create(bots.CreateParams{Name: "ci", OwnerID: "alice", SlashCommands: []bots.SlashCommand{{Name: "deploy"}}})
-	disp := bots.NewDispatcher(reg, sp.store)
-	sp.SetBotSink(disp)
+	reg := appsplatform.NewMemoryRegistry()
+	_, _ = reg.Create(appsplatform.CreateParams{
+		Name:          "ci",
+		OwnerID:       "alice",
+		Products:      []string{appsplatform.ProductTalk},
+		SlashCommands: []appsplatform.SlashCommand{{Name: "deploy"}},
+	})
+	disp := appsplatform.NewDispatcher(reg, appsplatform.ProductTalk)
+	sink := NewAppsSink(reg, disp, NewTalkAdapter(sp))
+	sp.SetBotSink(sink)
 
 	r := gin.New()
 	r.Use(func(c *gin.Context) {

@@ -16,6 +16,7 @@
     "seed-demo": "node scripts/seed-demo.mjs"
   },
   "dependencies": {
+    "@vulos/apps-ui": "file:../vulos-apps/ui",
     "@vulos/board-ui": "file:../board-ui",
     "@vulos/relay-client": "file:../vulos-relay/client",
     "dompurify": "^3.4.5",
