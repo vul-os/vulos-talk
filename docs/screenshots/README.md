@@ -10,6 +10,7 @@ seeded demo backend (scripts/seed-demo.mjs). Regenerate with `npm run screenshot
 | dm.png | Direct message between two teammates |
 | search.png | In-channel search with live results |
 | slash-command.png | Slash-command autocomplete in the composer |
+| quick-switcher.png | Command-palette quick switcher (⌘K) with match highlighting |
 | bots.png | Apps & Bots — create and manage bot apps + tokens |
 | mobile.png | Single-column mobile layout (390×844) |
 | huddles.png | Huddles — scheduled meeting rooms with join links |

@@ -106,13 +106,17 @@ Generated from a seeded demo backend with `npm run screenshots`
 |---|---|
 | ![DM](docs/screenshots/dm.png) | ![Search](docs/screenshots/search.png) |
 
-| Slash-command autocomplete | Apps & Bots console |
+| Slash-command autocomplete | Quick switcher (⌘K) |
 |---|---|
-| ![Slash command](docs/screenshots/slash-command.png) | ![Bots](docs/screenshots/bots.png) |
+| ![Slash command](docs/screenshots/slash-command.png) | ![Quick switcher](docs/screenshots/quick-switcher.png) |
 
-| Mobile (single column) | Huddles |
+| Apps & Bots console | Huddles |
 |---|---|
-| <img src="docs/screenshots/mobile.png" alt="Mobile" width="240"> | ![Huddles](docs/screenshots/huddles.png) |
+| ![Bots](docs/screenshots/bots.png) | ![Huddles](docs/screenshots/huddles.png) |
+
+| Mobile (single column) | |
+|---|---|
+| <img src="docs/screenshots/mobile.png" alt="Mobile" width="240"> | |
 
 ## Quick start (standalone)
 

@@ -17,7 +17,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Hash, Lock, AtSign, Plus, Users, Search, ChevronDown, ChevronRight,
-  Pencil, MessageSquare, Bell, Bot, HelpCircle, X, Menu, Home, User,
+  Pencil, MessageSquare, Bell, Bot, HelpCircle, X, Menu, Home, User, Video,
 } from 'lucide-react'
 import ChannelView from './ChannelView.jsx'
 import ActivityView from './ActivityView.jsx'
@@ -28,6 +28,7 @@ import { STATUS_ONLINE } from '@vulos/relay-client/presence'
 import { PresenceDot, StatusPicker } from '../../components/PresenceBar.jsx'
 import { Button, IconButton, Input, Modal, Sidebar, LoadingState, ThemeSwitch } from '../../components/ui'
 import { avatarColor } from './avatar.js'
+import { TalkMark } from '../../components/TalkLogo.jsx'
 
 // ---------------------------------------------------------------------------
 // useRestPresence (unchanged) — OFFICE-62 REST/poll presence.
@@ -350,15 +351,22 @@ function SpacesSidebar({
   return (
     <Sidebar collapsed={false} className="!w-full md:!w-60 h-full">
       {/* Workspace header */}
-      <div className="flex items-center justify-between h-12 px-3 border-b border-line flex-shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-6 h-6 rounded-md bg-accent text-white flex items-center justify-center text-xs font-semibold flex-shrink-0">V</div>
-          <span className="text-sm font-semibold text-ink tracking-tightish truncate">Vulos Talk</span>
-        </div>
-        <IconButton size="sm" title="Apps & Bots" aria-label="Apps & Bots" onClick={() => navigate('/apps')}>
-          <Bot size={15} />
-        </IconButton>
-      </div>
+      <button
+        type="button"
+        onClick={() => navigate('/')}
+        className="group flex items-center justify-between h-14 px-3 border-b border-line flex-shrink-0 hover:bg-bg-hover transition-colors text-left"
+      >
+        <span className="flex items-center gap-2.5 min-w-0">
+          <TalkMark size={28} />
+          <span className="flex flex-col min-w-0 -space-y-0.5">
+            <span className="text-sm font-semibold text-ink tracking-tightish truncate leading-tight">Vulos Talk</span>
+            <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint leading-tight">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-success" /> workspace
+            </span>
+          </span>
+        </span>
+        <ChevronDown size={14} className="text-ink-faint group-hover:text-ink-muted transition-colors flex-shrink-0" />
+      </button>
 
       {/* Compose + search */}
       <div className="px-2 pt-2.5 pb-2 space-y-1.5 border-b border-line flex-shrink-0">
@@ -446,6 +454,91 @@ function SpacesSidebar({
 }
 
 // ---------------------------------------------------------------------------
+// WorkspaceRail — the far-left global rail (Slack/Discord-class).
+// Workspace mark on top, primary destinations in the middle, self-presence +
+// theme at the foot. Desktop only; mobile uses the bottom nav.
+// ---------------------------------------------------------------------------
+
+function RailButton({ icon: Icon, label, active, badge, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      aria-current={active ? 'true' : undefined}
+      className="group relative w-full flex items-center justify-center h-11"
+    >
+      <span
+        aria-hidden
+        className={[
+          'absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full transition-all duration-base ease-spring',
+          active ? 'bg-accent-press opacity-100 scale-y-100' : 'bg-accent-press opacity-0 scale-y-50 group-hover:opacity-40 group-hover:scale-y-90',
+        ].join(' ')}
+      />
+      <span
+        className={[
+          'relative flex items-center justify-center h-9 w-9 rounded-lg transition-[background,color,transform] duration-fast ease-out',
+          active
+            ? 'bg-accent-tint text-accent-press border border-accent-tint-2'
+            : 'text-ink-faint border border-transparent hover:bg-bg-hover hover:text-ink active:scale-95',
+        ].join(' ')}
+      >
+        <Icon size={18} strokeWidth={active ? 2.1 : 1.8} />
+        {badge > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 inline-flex items-center justify-center rounded-pill bg-danger text-white text-[9px] font-bold tabular-nums ring-2 ring-bg-elev2">
+            {badge > 9 ? '9+' : badge}
+          </span>
+        )}
+      </span>
+    </button>
+  )
+}
+
+function WorkspaceRail({ view, activeChat, mentions, onHome, onActivity, navigate, localStatus, onOpenStatus }) {
+  return (
+    <nav
+      aria-label="Workspaces"
+      className="hidden md:flex flex-col items-center w-[60px] flex-shrink-0 bg-bg-sunk border-r border-line py-2"
+    >
+      <button
+        type="button"
+        onClick={onHome}
+        title="Vulos Talk"
+        aria-label="Vulos Talk home"
+        className="mb-1.5 rounded-xl ring-1 ring-line-strong/60 hover:ring-accent transition-[box-shadow,transform] duration-fast hover:scale-[1.03] active:scale-95"
+      >
+        <TalkMark size={36} />
+      </button>
+      <div className="w-7 h-px bg-line my-1.5" />
+
+      <div className="flex flex-col w-full">
+        <RailButton icon={Home} label="Channels" active={view === 'chat' && activeChat} onClick={onHome} />
+        <RailButton icon={Bell} label="Activity" active={view === 'activity'} badge={mentions} onClick={onActivity} />
+        <RailButton icon={Video} label="Huddles" onClick={() => navigate('/meet/dashboard')} />
+        <RailButton icon={Bot} label="Apps & Bots" onClick={() => navigate('/apps')} />
+      </div>
+
+      <div className="mt-auto flex flex-col items-center gap-2 w-full pt-2">
+        <div className="w-7 h-px bg-line" />
+        <button
+          type="button"
+          onClick={onOpenStatus}
+          title="You — set status"
+          aria-label="Set your status"
+          className="relative group"
+        >
+          <span className="flex items-center justify-center h-8 w-8 rounded-lg bg-accent text-white text-xs font-semibold tracking-tightish transition-transform duration-fast group-hover:scale-105 active:scale-95">
+            ME
+          </span>
+          <span className="absolute -bottom-0.5 -right-0.5"><PresenceDot status={localStatus} size={9} /></span>
+        </button>
+      </div>
+    </nav>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // SpacesApp — root
 // ---------------------------------------------------------------------------
 
@@ -465,6 +558,7 @@ export default function SpacesApp() {
   const [mobilePane, setMobilePane] = useState('list') // 'list' | 'main'
   const [quickOpen, setQuickOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [railStatusOpen, setRailStatusOpen] = useState(false)
 
   const { roster, setStatus: setRestStatus } = useRestPresence()
   const [localStatus, setLocalStatus] = useState(STATUS_ONLINE)
@@ -537,8 +631,29 @@ export default function SpacesApp() {
     ? <ChannelView channel={activeChannel} currentUser={currentUser} roster={roster} onStatusChange={handleSetStatus} onMobileBack={() => setMobilePane('list')} />
     : <ActivityView mode={view} channels={channels} currentUser={currentUser} onOpenChannel={selectChannel} />
 
+  const totalMentions = channels.reduce((n, ch) => n + (mentionCount(ch) || 0), 0)
+
   return (
     <div className="flex flex-1 min-h-0 bg-bg">
+      {/* Far-left global rail (desktop) */}
+      <div className="relative">
+        <WorkspaceRail
+          view={view}
+          activeChat={!!activeChannel}
+          mentions={totalMentions}
+          onHome={() => { setView('chat'); setMobilePane('main'); if (activeChannel) navigate(channelPath(activeChannel)); else navigate('/') }}
+          onActivity={() => { setView('activity'); setMobilePane('main') }}
+          navigate={navigate}
+          localStatus={localStatus}
+          onOpenStatus={() => setRailStatusOpen((v) => !v)}
+        />
+        {railStatusOpen && (
+          <div className="hidden md:block absolute left-[52px] bottom-3 z-50">
+            <StatusPicker currentStatus={localStatus} currentText={localStatusText} onStatusChange={handleSetStatus} onClose={() => setRailStatusOpen(false)} />
+          </div>
+        )}
+      </div>
+
       {/* Sidebar — drawer on mobile (clears the fixed bottom nav) */}
       <div className={['md:flex md:w-auto pb-14 md:pb-0', mobilePane === 'list' ? 'flex w-full' : 'hidden'].join(' ')}>
         <SpacesSidebar

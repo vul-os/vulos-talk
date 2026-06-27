@@ -51,6 +51,7 @@ only honest way to attribute seeded messages to different people.
 | `dm.png` | A direct message between two teammates |
 | `search.png` | In-channel search with live, highlighted results |
 | `slash-command.png` | Slash-command autocomplete in the composer |
+| `quick-switcher.png` | The command-palette quick switcher (⌘K) with match highlighting |
 | `bots.png` | Apps & Bots — create and manage bot apps + tokens |
 | `mobile.png` | Single-column mobile layout with the bottom nav (390×844) |
 | `huddles.png` | The huddles dashboard — scheduled rooms with join links |

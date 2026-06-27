@@ -27,7 +27,7 @@
  */
 
 import { chromium } from 'playwright'
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { spawn, execSync } from 'node:child_process'
@@ -73,6 +73,9 @@ async function startLocalServer() {
 
   const tmpWD = '/tmp/vulos-talk-ss-wd'
   mkdirSync(tmpWD, { recursive: true })
+  // Start from a clean data dir so re-runs don't accumulate duplicate seeded
+  // channels/meetings/bots (the seed is additive).
+  rmSync(DEMO_DATA_DIR, { recursive: true, force: true })
   mkdirSync(DEMO_DATA_DIR, { recursive: true })
   // Auth is ENABLED so seeded messages can be attributed to different authors
   // (the backend derives identity from the verified JWT subject only).
@@ -219,7 +222,19 @@ async function main() {
       await composer.fill('').catch(() => {})
     }
 
-    // 6. Apps & Bots — the standalone bot admin console (route /apps).
+    // 6. Quick switcher (⌘K) — the command-palette channel/DM jumper.
+    await gotoChannel('/channels/general')
+    await page.keyboard.press('Meta+k').catch(() => {})
+    await sleep(300)
+    const qs = page.locator('input[aria-label="Quick switcher"]').first()
+    if (await qs.count()) {
+      await qs.fill('de').catch(() => {})
+      await sleep(500)
+      results.push(await shot(page, 'quick-switcher', 'Command-palette quick switcher (⌘K) with match highlighting'))
+      await page.keyboard.press('Escape').catch(() => {})
+    }
+
+    // 7. Apps & Bots — the standalone bot admin console (route /apps).
     await page.goto(`${BASE}/apps`, { waitUntil: 'domcontentloaded', timeout: 20_000 })
     await sleep(1_500)
     results.push(await shot(page, 'bots', 'Apps & Bots — create and manage bot apps + tokens'))

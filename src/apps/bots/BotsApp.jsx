@@ -379,12 +379,17 @@ export default function BotsApp() {
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-bg">
-      <header className="flex items-center gap-2 h-12 px-3 bg-paper border-b border-line sticky top-0 z-10">
+      <header className="flex items-center gap-2.5 h-14 px-4 bg-paper border-b border-line sticky top-0 z-10">
         <IconButton title="Back to Talk" onClick={() => navigate('/')}>
           <ArrowLeft size={16} />
         </IconButton>
-        <Bot size={16} className="text-accent-press" />
-        <h1 className="text-sm font-semibold text-ink tracking-tightish">Apps &amp; Bots</h1>
+        <span className="flex items-center justify-center w-8 h-8 rounded-md bg-accent-tint border border-accent-tint-2 flex-shrink-0">
+          <Bot size={17} className="text-accent-press" />
+        </span>
+        <span className="flex flex-col -space-y-0.5 min-w-0">
+          <h1 className="text-sm font-semibold text-ink tracking-tightish leading-tight">Apps &amp; Bots</h1>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-ink-faint leading-tight">integrations</span>
+        </span>
         <div className="ml-auto">
           <Button variant="primary" size="sm" onClick={() => { setEditing(null); setShowForm(true) }}>
             <Plus size={14} /> Create bot

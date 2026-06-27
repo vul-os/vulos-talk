@@ -17,6 +17,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Send, Hash, Lock, AtSign, X, MessageSquare, ChevronRight, Search,
   Pin, Bell, UserPlus, AlignLeft, Eye, Headphones, ArrowDown, ArrowLeft, Smile, Slash,
+  Bold, Italic, Strikethrough, Code, Link as LinkIcon, List, Quote, Paperclip,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import MessageList from './MessageList.jsx'
@@ -34,9 +35,16 @@ import { toast } from '../../lib/toast.jsx'
 import { getDefaultStore, STATE_DELETED } from '../../lib/crdt/messages.js'
 import { PresenceDot } from '../../components/PresenceBar.jsx'
 import { IconButton, Input, Modal, Topbar, Button } from '../../components/ui'
+import { avatarColor } from './avatar.js'
 
 const POLL_INTERVAL_MS = 3000
 const AUTO_AWAY_MS = 10 * 60 * 1000
+
+// Shared composer tool-button styling (formatting toolbar + action row).
+const fmtBtn =
+  'inline-flex items-center justify-center h-7 w-7 rounded-sm text-ink-faint ' +
+  'hover:text-ink hover:bg-accent-tint transition-colors duration-fast ' +
+  'disabled:opacity-40 disabled:cursor-not-allowed'
 
 function ChannelIcon({ type, size = 15 }) {
   if (type === 'dm') return <AtSign size={size} className="text-accent" />
@@ -47,6 +55,44 @@ function ChannelIcon({ type, size = 15 }) {
 function formatTime(ts) {
   if (!ts) return ''
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+// ---- MemberStack — overlapping avatar group in the channel header ------------
+function MemberStack({ members = [], roster = [], onClick }) {
+  if (members.length === 0) return null
+  const presenceOf = (id) => roster.find((p) => p.accountId === id)
+  const shown = members.slice(0, 4)
+  const overflow = members.length - shown.length
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`${members.length} member${members.length !== 1 ? 's' : ''}`}
+      aria-label={`${members.length} members`}
+      className="hidden md:flex items-center group/ms pl-1 pr-1.5 h-8 rounded-md hover:bg-accent-tint transition-colors"
+    >
+      <span className="flex items-center">
+        {shown.map((m, i) => {
+          const id = m.account_id || m.accountId
+          const name = m.display_name || m.displayName || id || '?'
+          const p = presenceOf(id)
+          return (
+            <span key={id || i} className="relative -ml-1.5 first:ml-0" style={{ zIndex: shown.length - i }}>
+              <span
+                className="flex items-center justify-center w-6 h-6 rounded-md text-white text-[10px] font-semibold ring-2 ring-paper select-none"
+                style={{ backgroundColor: p?.color || avatarColor(id) }}
+              >
+                {String(name)[0].toUpperCase()}
+              </span>
+            </span>
+          )
+        })}
+      </span>
+      {overflow > 0 && (
+        <span className="ml-1 text-2xs font-medium text-ink-faint tabular-nums">+{overflow}</span>
+      )}
+    </button>
+  )
 }
 
 // ---- local reactions store ---------------------------------------------------
@@ -302,6 +348,7 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
   const bottomRef = useRef(null)
   const pollRef = useRef(null)
   const composeRef = useRef(null)
+  const fileInputRef = useRef(null)
   const awayTimerRef = useRef(null)
   const crdtStore = getDefaultStore()
 
@@ -536,6 +583,60 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
     composeRef.current?.focus()
   }
 
+  // ---- composer formatting toolbar -------------------------------------------
+  // Wrap (or prefix) the current selection with markdown, then restore focus +
+  // a sensible selection so the user can keep typing inside the new marks.
+  function applyFormat(kind) {
+    const ta = composeRef.current
+    if (!ta) return
+    const start = ta.selectionStart ?? body.length
+    const end = ta.selectionEnd ?? body.length
+    const sel = body.slice(start, end)
+    const WRAP = {
+      bold: ['**', '**', 'bold'],
+      italic: ['_', '_', 'italic'],
+      strike: ['~~', '~~', 'strikethrough'],
+      code: ['`', '`', 'code'],
+      link: null, // handled below
+    }
+    let next, caretStart, caretEnd
+    if (kind === 'link') {
+      const text = sel || 'text'
+      const inserted = `[${text}](url)`
+      next = body.slice(0, start) + inserted + body.slice(end)
+      // select the "url" token for quick replacement
+      caretStart = start + text.length + 3
+      caretEnd = caretStart + 3
+    } else if (kind === 'list' || kind === 'quote') {
+      const prefix = kind === 'list' ? '- ' : '> '
+      // prefix every selected line (or the current empty line)
+      const block = sel || ''
+      const prefixed = block.split('\n').map((l) => prefix + l).join('\n') || prefix
+      next = body.slice(0, start) + prefixed + body.slice(end)
+      caretStart = start + prefixed.length
+      caretEnd = caretStart
+    } else {
+      const [open, close, ph] = WRAP[kind] || WRAP.bold
+      const content = sel || ph
+      next = body.slice(0, start) + open + content + close + body.slice(end)
+      caretStart = start + open.length
+      caretEnd = caretStart + content.length
+    }
+    setBody(next)
+    requestAnimationFrame(() => {
+      ta.focus()
+      try { ta.setSelectionRange(caretStart, caretEnd) } catch {}
+      ta.style.height = 'auto'
+      ta.style.height = ta.scrollHeight + 'px'
+    })
+  }
+
+  function handlePickFiles(e) {
+    const files = Array.from(e.target.files || [])
+    if (files.length) setPendingFiles((p) => [...p, ...files])
+    e.target.value = ''
+  }
+
   function startHuddle() {
     // TODO(seam-C): route huddle audio/video through vulos-meet rather than the
     // standalone Meetings flow — for now we navigate to the existing /meet/:id
@@ -595,15 +696,20 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
                     <ArrowLeft size={16} />
                   </IconButton>
                 )}
-                <ChannelIcon type={channel.type} size={15} />
-                <span className="font-semibold text-ink tracking-tightish text-sm truncate">{channel.name}</span>
-                {desc && <span className="text-2xs text-ink-faint hidden md:inline truncate max-w-[200px]">— {desc}</span>}
-                <span className="text-2xs text-ink-faint hidden sm:inline">{members.length > 0 && `${members.length} members`}</span>
+                <span className="flex items-center justify-center w-7 h-7 rounded-md bg-bg-elev2 border border-line flex-shrink-0">
+                  <ChannelIcon type={channel.type} size={15} />
+                </span>
+                <span className="flex flex-col min-w-0 -space-y-0.5">
+                  <span className="font-semibold text-ink tracking-tightish text-sm truncate leading-tight">{channel.name}</span>
+                  {desc && <span className="text-2xs text-ink-faint truncate max-w-[260px] leading-tight hidden md:block">{desc}</span>}
+                </span>
               </span>
             }
             title={<span />}
             actions={
               <div className="flex items-center gap-1">
+                <MemberStack members={members} roster={roster} onClick={() => channel.type === 'private' ? setShowInvite(true) : undefined} />
+                <span className="w-px h-5 bg-line mx-0.5 hidden md:block" />
                 <button type="button" onClick={startHuddle} className={headerActionBtn(false)} title="Start a huddle" aria-label="Start a huddle">
                   <Headphones size={14} />
                 </button>
@@ -682,79 +788,107 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
 
             <PendingFileList files={pendingFiles} onRemove={(i) => setPendingFiles((f) => f.filter((_, idx) => idx !== i))} />
 
-            <div className="flex items-center gap-1 mb-1.5">
-              <button
-                type="button"
-                onClick={() => setPreviewMode((v) => !v)}
-                className={['text-2xs px-2 py-0.5 rounded-sm border transition-colors', previewMode ? 'border-accent bg-accent-tint text-accent-press' : 'border-transparent text-ink-faint hover:text-ink'].join(' ')}
-                title={previewMode ? 'Edit markdown' : 'Preview'}
-              >
-                {previewMode
-                  ? <span className="flex items-center gap-1"><AlignLeft size={11} /> Edit</span>
-                  : <span className="flex items-center gap-1"><Eye size={11} /> Preview</span>}
-              </button>
-              <span className="text-2xs text-ink-faint hidden sm:inline">**bold** _italic_ `code` · @ mention · / commands</span>
-            </div>
+            <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handlePickFiles} aria-hidden tabIndex={-1} />
 
-            {previewMode ? (
-              <div className="bg-bg-elev2 border border-line rounded-md px-3 py-2 min-h-[40px] text-sm text-ink mb-2">
-                {body.trim() ? <RichMessage body={body} members={mentionMembers} /> : <span className="text-ink-faint italic text-xs">Nothing to preview.</span>}
+            <div className="rounded-lg border border-line bg-paper focus-within:border-accent focus-within:shadow-focus transition-[border-color,box-shadow] duration-fast ease-out">
+              {/* Formatting toolbar */}
+              <div className="flex items-center gap-0.5 px-1.5 h-8 border-b border-line">
+                {[
+                  { kind: 'bold', Icon: Bold, label: 'Bold (⌘B)' },
+                  { kind: 'italic', Icon: Italic, label: 'Italic (⌘I)' },
+                  { kind: 'strike', Icon: Strikethrough, label: 'Strikethrough' },
+                ].map(({ kind, Icon, label }) => (
+                  <button key={kind} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(kind)} disabled={previewMode} title={label} aria-label={label} className={fmtBtn}><Icon size={14} /></button>
+                ))}
+                <span className="w-px h-4 bg-line mx-0.5" />
+                {[
+                  { kind: 'code', Icon: Code, label: 'Code' },
+                  { kind: 'link', Icon: LinkIcon, label: 'Link' },
+                  { kind: 'list', Icon: List, label: 'Bulleted list' },
+                  { kind: 'quote', Icon: Quote, label: 'Quote' },
+                ].map(({ kind, Icon, label }) => (
+                  <button key={kind} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat(kind)} disabled={previewMode} title={label} aria-label={label} className={fmtBtn}><Icon size={14} /></button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setPreviewMode((v) => !v)}
+                  className={['ml-auto inline-flex items-center gap-1 text-2xs px-2 h-6 rounded-sm border transition-colors', previewMode ? 'border-accent bg-accent-tint text-accent-press' : 'border-transparent text-ink-faint hover:text-ink hover:bg-accent-tint'].join(' ')}
+                  title={previewMode ? 'Edit markdown' : 'Preview'}
+                >
+                  {previewMode ? <><AlignLeft size={11} /> Edit</> : <><Eye size={11} /> Preview</>}
+                </button>
               </div>
-            ) : (
-              <div className="relative flex gap-1 items-end bg-paper border border-line rounded-md focus-within:border-accent focus-within:shadow-focus transition-[border-color,box-shadow] duration-fast ease-out">
-                {mentionQuery !== null && (
-                  <div className="absolute bottom-full left-0 mb-1 z-50">
-                    <MentionPicker members={mentionMembers} query={mentionQuery.query} onSelect={handleMentionSelect} onClose={() => setMentionQuery(null)} />
-                  </div>
-                )}
-                {slashQuery !== null && (
-                  <div className="absolute bottom-full left-0 mb-1 z-50">
-                    <SlashCommandPicker commands={commands} query={slashQuery.query} onSelect={handleSlashSelect} onClose={() => setSlashQuery(null)} />
-                  </div>
-                )}
 
-                <textarea
-                  ref={composeRef}
-                  className="flex-1 bg-transparent outline-none px-3 py-2 text-sm resize-none max-h-40 text-ink placeholder:text-ink-faint"
-                  rows={1}
-                  placeholder={`Message ${isDM ? '' : '#'}${channel.name}…`}
-                  value={body}
-                  onChange={handleComposeChange}
-                  onFocus={markReadLatest}
-                  onKeyDown={(e) => {
-                    if (mentionQuery !== null || slashQuery !== null) {
-                      if (['ArrowUp', 'ArrowDown', 'Tab', 'Enter', 'Escape'].includes(e.key)) return
-                    }
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      pendingFiles.length > 0 ? uploadAndSend() : send()
-                    }
-                  }}
-                />
+              {previewMode ? (
+                <div className="px-3 py-2 min-h-[44px] text-sm text-ink">
+                  {body.trim() ? <RichMessage body={body} members={mentionMembers} /> : <span className="text-ink-faint italic text-xs">Nothing to preview.</span>}
+                </div>
+              ) : (
+                <div className="relative">
+                  {mentionQuery !== null && (
+                    <div className="absolute bottom-full left-0 mb-1 z-50">
+                      <MentionPicker members={mentionMembers} query={mentionQuery.query} onSelect={handleMentionSelect} onClose={() => setMentionQuery(null)} />
+                    </div>
+                  )}
+                  {slashQuery !== null && (
+                    <div className="absolute bottom-full left-0 mb-1 z-50">
+                      <SlashCommandPicker commands={commands} query={slashQuery.query} onSelect={handleSlashSelect} onClose={() => setSlashQuery(null)} />
+                    </div>
+                  )}
+                  <textarea
+                    ref={composeRef}
+                    className="block w-full bg-transparent outline-none px-3 py-2.5 text-sm resize-none max-h-40 text-ink placeholder:text-ink-faint"
+                    rows={1}
+                    placeholder={`Message ${isDM ? '' : '#'}${channel.name}…`}
+                    value={body}
+                    onChange={handleComposeChange}
+                    onFocus={markReadLatest}
+                    onKeyDown={(e) => {
+                      const mod = e.metaKey || e.ctrlKey
+                      if (mod && (e.key === 'b' || e.key === 'B')) { e.preventDefault(); applyFormat('bold'); return }
+                      if (mod && (e.key === 'i' || e.key === 'I')) { e.preventDefault(); applyFormat('italic'); return }
+                      if (mentionQuery !== null || slashQuery !== null) {
+                        if (['ArrowUp', 'ArrowDown', 'Tab', 'Enter', 'Escape'].includes(e.key)) return
+                      }
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        pendingFiles.length > 0 ? uploadAndSend() : send()
+                      }
+                    }}
+                  />
+                </div>
+              )}
 
-                <div className="relative flex items-center">
-                  <button type="button" onClick={() => setShowComposerEmoji((v) => !v)} className="m-1 p-1.5 rounded-sm text-ink-faint hover:text-ink hover:bg-accent-tint transition-colors" title="Emoji" aria-label="Insert emoji">
+              {/* Action row */}
+              <div className="flex items-center gap-0.5 px-1.5 h-10">
+                <button type="button" onClick={() => fileInputRef.current?.click()} className={fmtBtn} title="Attach files" aria-label="Attach files">
+                  <Paperclip size={16} />
+                </button>
+                <div className="relative">
+                  <button type="button" onClick={() => setShowComposerEmoji((v) => !v)} className={fmtBtn} title="Emoji" aria-label="Insert emoji">
                     <Smile size={16} />
                   </button>
                   {showComposerEmoji && (
-                    <div className="absolute right-0 bottom-full mb-1 z-50">
+                    <div className="absolute left-0 bottom-full mb-1 z-50">
                       <EmojiPicker onPick={insertEmoji} onClose={() => setShowComposerEmoji(false)} />
                     </div>
                   )}
                 </div>
-
+                <span className="ml-1.5 text-2xs text-ink-faint hidden sm:inline">
+                  <kbd className="font-mono">⏎</kbd> to send · <kbd className="font-mono">⇧⏎</kbd> newline · <span className="text-accent-press">@</span> mention · <span className="text-accent-press">/</span> commands
+                </span>
                 <button
                   type="button"
                   onClick={pendingFiles.length > 0 ? uploadAndSend : send}
                   disabled={(!body.trim() && pendingFiles.length === 0) || sending}
                   title="Send"
                   aria-label="Send"
-                  className="m-1 inline-flex items-center justify-center h-8 w-8 rounded-sm bg-accent text-white shadow-e1 hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-[background,opacity] duration-fast ease-out flex-shrink-0"
+                  className="ml-auto inline-flex items-center justify-center h-8 w-8 rounded-md bg-accent text-white shadow-e1 hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-[background,opacity,transform] duration-fast ease-out flex-shrink-0 active:scale-95"
                 >
                   <Send size={14} />
                 </button>
               </div>
-            )}
+            </div>
           </div>
         </div>
       </FileUploadZone>

@@ -10,9 +10,10 @@
  *   - Emoji reactions (counts, add, toggle), best-effort link previews.
  *   - A "new messages" unread divider at the first unread message.
  */
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import {
   MoreHorizontal, MessageSquare, Pencil, Trash2, X, Check, Smile, Pin, Link as LinkIcon,
+  AtSign,
 } from 'lucide-react'
 import { STATE_DELETED, STATE_EDITED } from '../../lib/crdt/messages.js'
 import { PresenceDot } from '../../components/PresenceBar.jsx'
@@ -34,23 +35,68 @@ function formatDate(ts) {
   return new Date(ts).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
 }
 
-function Avatar({ name, presencePeer, size = 36 }) {
+function Avatar({ name, presencePeer, size = 36, onClick }) {
   const initials = (name || '?')[0].toUpperCase()
   const bg = presencePeer?.color || avatarColor(name)
   return (
-    <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
-      <div
-        className="w-full h-full rounded-md flex items-center justify-center text-white text-sm font-semibold tracking-tightish select-none"
+    <button
+      type="button"
+      onClick={onClick}
+      className="relative flex-shrink-0 rounded-md transition-transform duration-fast ease-out hover:scale-[1.06] focus-visible:outline-none focus-visible:shadow-focus"
+      style={{ width: size, height: size }}
+      aria-label={`${presencePeer?.displayName || name} — profile`}
+    >
+      <span
+        className="w-full h-full rounded-md flex items-center justify-center text-white text-sm font-semibold tracking-tightish select-none ring-1 ring-inset ring-white/10 shadow-e1"
         style={{ backgroundColor: bg }}
-        title={presencePeer?.statusText ? `${presencePeer.displayName} — ${presencePeer.statusText}` : presencePeer?.displayName || name}
       >
         {initials}
-      </div>
+      </span>
       {presencePeer && (
         <span className="absolute -bottom-0.5 -right-0.5">
           <PresenceDot status={presencePeer.status} size={8} />
         </span>
       )}
+    </button>
+  )
+}
+
+// ---- ProfileCard — identity + presence popover ------------------------------
+function ProfileCard({ authorId, peer, onClose }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) onClose() }
+    function onEsc(e) { if (e.key === 'Escape') onClose() }
+    const t = setTimeout(() => document.addEventListener('mousedown', onDoc), 0)
+    document.addEventListener('keydown', onEsc)
+    return () => { clearTimeout(t); document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onEsc) }
+  }, [onClose])
+  const name = peer?.displayName || authorId
+  const bg = peer?.color || avatarColor(authorId)
+  const statusLabel = { online: 'Active', away: 'Away', dnd: 'Do not disturb', 'in-a-call': 'In a call' }[peer?.status] || 'Offline'
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label={`${name} profile`}
+      className="absolute left-0 top-7 z-50 w-60 bg-paper border border-line rounded-lg shadow-e3 overflow-hidden animate-scale-in"
+    >
+      <div className="h-9 bg-gradient-to-r from-accent-tint to-accent-tint-2" />
+      <div className="px-3 pb-3 -mt-5">
+        <span
+          className="flex items-center justify-center w-12 h-12 rounded-lg text-white text-lg font-semibold ring-2 ring-paper shadow-e1 select-none"
+          style={{ backgroundColor: bg }}
+        >
+          {String(name)[0].toUpperCase()}
+        </span>
+        <p className="mt-2 text-sm font-semibold text-ink tracking-tightish truncate">{name}</p>
+        <p className="text-2xs text-ink-faint truncate">@{authorId}</p>
+        <div className="mt-2 flex items-center gap-1.5 text-xs text-ink-muted">
+          <PresenceDot status={peer?.status || 'offline'} size={8} />
+          <span>{statusLabel}</span>
+          {peer?.statusText && <span className="text-ink-faint truncate">· {peer.statusText}</span>}
+        </div>
+      </div>
     </div>
   )
 }
@@ -117,6 +163,7 @@ function MessageItem({
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editBody, setEditBody] = useState(msg.body)
+  const [showProfile, setShowProfile] = useState(false)
   const emojiAnchorRef = useRef(null)
 
   const isOwn = msg.author_id === currentUser
@@ -135,11 +182,12 @@ function MessageItem({
       data-msg-id={msg.id}
       onContextMenu={(e) => { e.preventDefault(); setShowMenu(true) }}
       className={[
-        'group relative flex gap-3 px-4 transition-colors duration-fast ease-out',
+        'group relative flex gap-3 pl-4 pr-4 transition-colors duration-fast ease-out',
         grouped ? 'py-0.5' : 'pt-2 pb-1 mt-1',
         isOwn ? 'hover:bg-accent-tint/40' : 'hover:bg-bg-elev2',
       ].join(' ')}
     >
+      <span aria-hidden className="absolute left-0 top-0 bottom-0 w-[2px] bg-accent-press opacity-0 group-hover:opacity-100 transition-opacity duration-fast" />
       {/* Gutter: avatar (group head) or hover-timestamp (grouped follow-on) */}
       {grouped ? (
         <div className="w-9 flex-shrink-0 flex items-start justify-end pr-0.5">
@@ -148,14 +196,23 @@ function MessageItem({
           </span>
         </div>
       ) : (
-        <Avatar name={msg.author_id} presencePeer={presencePeer} />
+        <div className="relative">
+          <Avatar name={msg.author_id} presencePeer={presencePeer} onClick={() => setShowProfile((v) => !v)} />
+          {showProfile && <ProfileCard authorId={msg.author_id} peer={presencePeer} onClose={() => setShowProfile(false)} />}
+        </div>
       )}
 
       <div className="flex-1 min-w-0">
         {!grouped && (
-          <div className="flex items-baseline gap-2">
-            <span className="font-semibold text-sm text-ink tracking-tightish">{msg.author_id}</span>
-            <span className="text-2xs text-ink-faint">{formatTime(msg.created_at)}</span>
+          <div className="flex items-baseline gap-2 relative">
+            <button
+              type="button"
+              onClick={() => setShowProfile((v) => !v)}
+              className="font-semibold text-sm text-ink tracking-tightish hover:underline decoration-line-emphasis underline-offset-2"
+            >
+              {msg.author_id}
+            </button>
+            <span className="text-2xs text-ink-faint tabular-nums">{formatTime(msg.created_at)}</span>
             {msg.state === STATE_EDITED && <span className="text-2xs text-ink-faint italic">edited</span>}
             {isPinned && <PinBadge />}
           </div>
@@ -226,7 +283,7 @@ function MessageItem({
 
       {/* Hover action toolbar */}
       {!isDeleted && (
-        <div className="absolute right-3 -top-2 flex items-center gap-0.5 bg-paper border border-line rounded-md shadow-e1 px-0.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-fast">
+        <div className="absolute right-3 -top-3 flex items-center gap-0.5 bg-paper border border-line rounded-lg shadow-e2 px-0.5 py-0.5 opacity-0 translate-y-0.5 group-hover:opacity-100 group-hover:translate-y-0 transition-[opacity,transform] duration-fast ease-out">
           <div className="relative" ref={emojiAnchorRef}>
             <button type="button" onClick={() => setShowEmojiPicker((v) => !v)} className="p-1 rounded-sm text-ink-faint hover:text-ink hover:bg-accent-tint transition-colors" title="React" aria-label="Add reaction">
               <Smile size={14} />
