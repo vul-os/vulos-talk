@@ -34,8 +34,9 @@ import { api } from '../../lib/api.js'
 import { toast } from '../../lib/toast.jsx'
 import { getDefaultStore, STATE_DELETED } from '../../lib/crdt/messages.js'
 import { PresenceDot } from '../../components/PresenceBar.jsx'
-import { IconButton, Input, Modal, Topbar, Button } from '../../components/ui'
+import { IconButton, Input, Modal, Topbar, Button, Tabs } from '../../components/ui'
 import { avatarColor } from './avatar.js'
+import ChannelBoard from './ChannelBoard.jsx'
 
 const POLL_INTERVAL_MS = 3000
 const AUTO_AWAY_MS = 10 * 60 * 1000
@@ -344,6 +345,7 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
   const [slashQuery, setSlashQuery] = useState(null)
   const [commands, setCommands] = useState([])
   const [lastReadClock, setLastReadClock] = useState(null)
+  const [tab, setTab] = useState('messages') // 'messages' | 'board'
 
   const bottomRef = useRef(null)
   const pollRef = useRef(null)
@@ -439,6 +441,7 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
   useEffect(() => {
     setMessages([]); setError(null); setThreadRoot(null); setShowSearch(false)
     setShowPinned(false); setPendingFiles([]); setBody(''); setMentionQuery(null); setSlashQuery(null)
+    setTab('messages')
     if (!channel) return
     loadMessages(); loadMembers(); loadPins(); loadReactions(); loadReadState()
     pollRef.current = setInterval(() => { loadMessages(); loadReactions() }, POLL_INTERVAL_MS)
@@ -735,6 +738,20 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
             }
           />
 
+          <Tabs
+            value={tab}
+            onChange={setTab}
+            items={[
+              { value: 'messages', label: 'Messages' },
+              { value: 'board', label: 'Board' },
+            ]}
+            className="px-2 bg-paper"
+          />
+
+          {tab === 'board' ? (
+            <ChannelBoard channelId={channel.id} currentUser={currentUser} displayName={selfLabel} />
+          ) : (
+          <>
           {showSearch && <SearchBar messages={messages} onJump={jumpToMessage} onClose={() => setShowSearch(false)} />}
 
           {error && (
@@ -890,10 +907,12 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
               </div>
             </div>
           </div>
+          </>
+          )}
         </div>
       </FileUploadZone>
 
-      {liveThreadRoot && !showPinned && (
+      {tab === 'messages' && liveThreadRoot && !showPinned && (
         <>
           <div className="hidden md:flex">
             <ThreadPanel root={liveThreadRoot} replies={threadReplies} onSend={sendThreadReply} onClose={() => setThreadRoot(null)} currentUser={currentUser || 'me'} />
@@ -904,7 +923,7 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
         </>
       )}
 
-      {showPinned && <PinnedPanel pinnedMsgs={pinnedMsgs} onJump={jumpToMessage} onUnpin={handleUnpin} onClose={() => setShowPinned(false)} />}
+      {tab === 'messages' && showPinned && <PinnedPanel pinnedMsgs={pinnedMsgs} onJump={jumpToMessage} onUnpin={handleUnpin} onClose={() => setShowPinned(false)} />}
 
       <InviteMemberModal open={showInvite} onClose={() => setShowInvite(false)} channelId={channel.id} roster={displayRoster} onInvited={loadMembers} />
     </div>
