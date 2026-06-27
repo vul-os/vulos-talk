@@ -1,22 +1,22 @@
 // Command vulos-talk is the standalone Vulos Talk product: team chat with
-// channels/"Spaces", DMs, threads, and real-time huddles/meetings.
+// channels/"Spaces", DMs, threads, and huddles.
 //
-// It is extracted from vulos-office and mirrors office's conventions: a Go
-// (gin) backend that serves the meeting + spaces API and embeds the built React
+// It is a Go (gin) backend that serves the Spaces API and embeds the built React
 // SPA via //go:embed dist. It runs COMPLETELY STANDALONE — identity is verified
 // against a local JWT secret, entitlements are unlimited (self-host), and usage
 // metering is a no-op (the integration seam). The vulos-cloud control plane is
 // optional and engaged only when VULOS_CP_BASE_URL is set, in which case the
 // backend/integration/cloud adapter resolves entitlements and reports usage
-// against the cp (mirroring vulos-office). The core never imports that adapter —
-// only this composition root does — so removing it can never break the
-// standalone build.
+// against the cp. The core never imports that adapter — only this composition
+// root does — so removing it can never break the standalone build.
 //
-// TODO(seam-C): route huddle video through vulos-meet — today Talk hosts its
-// own WebRTC meeting/lobby/TURN backend (carried from office). The product map
-// consolidates real-time video into the dedicated vulos-meet product; when that
-// lands, replace the /meetings + /meet + /turn surface with a seam-C handoff to
-// vulos-meet and keep only chat/spaces here.
+// Seam-C (real-time video): Talk does NOT host audio/video. Starting a huddle in
+// a channel hands the member off to the dedicated vulos-meet product — Talk mints
+// a VULOS-MEET/1 join token (locally, or brokered via the control plane) and the
+// SPA embeds the Meet web client in an iframe, with Meet's in-call chat pointed
+// back at the originating Talk channel. Meet is an OPTIONAL dependency: with no
+// Meet configured the huddle action degrades to a "video not configured" state
+// and Talk standalone (chat + Spaces) is fully functional. See backend/meet.
 package main
 
 import (
@@ -31,11 +31,10 @@ import (
 	"vulos-talk/backend/config"
 	"vulos-talk/backend/handlers"
 	"vulos-talk/backend/integration/cloud"
+	"vulos-talk/backend/meet"
 	"vulos-talk/backend/middleware"
 	"vulos-talk/backend/obs"
 	"vulos-talk/backend/seam"
-	"vulos-talk/backend/services/meeting"
-	"vulos-talk/backend/storage"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -71,24 +70,6 @@ func main() {
 			"to a strong random value (or %s=1 for local dev)",
 			middleware.EnvJWTSecret, middleware.EnvDevMode)
 	}
-
-	store, err := storage.New(cfg)
-	if err != nil {
-		log.Fatal("Storage init failed:", err)
-	}
-
-	// Durable lobby/meeting store (file-backed SQLite, survives restarts).
-	lobbyDSN := os.Getenv("VULOS_LOBBY_DB")
-	if lobbyDSN == "" {
-		lobbyDSN = cfg.Server.DataDir + "/lobby.db"
-	}
-	if err := meeting.InitDefault(lobbyDSN); err != nil {
-		log.Fatalf("Lobby store init failed (%s): %v", lobbyDSN, err)
-	}
-	log.Printf("Lobby store → %s", lobbyDSN)
-
-	// Org-bucket object store (for meeting recordings). Boots without cloud.
-	storage.InitOrgBucket()
 
 	// Integration seam: standalone by default; cloud control plane is optional
 	// and wired only when configured (VULOS_CP_BASE_URL). The core never imports
@@ -150,35 +131,6 @@ func main() {
 		protected.Use(middleware.Auth(cfg))
 	}
 
-	// Short-lived TURN/ICE credentials for WebRTC huddles.
-	turnHandler := handlers.NewTURNHandler()
-	protected.GET("/turn/credentials", turnHandler.Credentials)
-
-	// Meetings: unified rooms with lobby, signed tokens, organizer-only controls.
-	meetingHandler := handlers.NewMeetingHandler(store)
-	protected.POST("/meetings", meetingHandler.Create)
-	protected.GET("/meetings", meetingHandler.List)
-	protected.GET("/meetings/:id", meetingHandler.Get)
-	protected.PUT("/meetings/:id", meetingHandler.Update)
-	protected.DELETE("/meetings/:id", meetingHandler.Delete)
-	// Join is public — external invitees follow a bare link with no Vulos account.
-	api.GET("/meetings/:id/join", meetingHandler.Join)
-
-	meetJoinHandler := handlers.NewMeetJoinHandler(store)
-	api.POST("/meet/:roomId/token", meetJoinHandler.IssueToken)
-	api.POST("/meet/:roomId/lobby/enter", meetJoinHandler.LobbyEnter)
-	protected.GET("/meet/:roomId/lobby", meetJoinHandler.LobbyList)
-	protected.POST("/meet/:roomId/admit", meetJoinHandler.Admit)
-	protected.POST("/meet/:roomId/admit-all", meetJoinHandler.AdmitAll)
-	protected.POST("/meet/:roomId/deny", meetJoinHandler.Deny)
-
-	// Recordings: authenticated, membership-checked storage writes/reads.
-	recordingHandler := handlers.NewRecordingHandler(store)
-	protected.POST("/meet/:roomId/recordings", recordingHandler.Upload)
-	protected.GET("/meet/:roomId/recordings", recordingHandler.List)
-	protected.GET("/meet/:roomId/recordings/:rid", recordingHandler.Download)
-	protected.DELETE("/meet/:roomId/recordings/:rid", recordingHandler.Delete)
-
 	// Presence (REST/poll heartbeat + roster) for Spaces.
 	presenceHandler := handlers.NewPresenceHandler()
 	protected.POST("/spaces/presence/heartbeat", presenceHandler.Heartbeat)
@@ -211,6 +163,20 @@ func main() {
 	protected.GET("/spaces/channels/:channelId/search", spacesHandler.SearchMessages)
 	protected.GET("/spaces/channels/:channelId/threads/:parentId", spacesHandler.ListThread)
 	protected.POST("/spaces/channels/:channelId/threads/:parentId/reply", spacesHandler.ReplyThread)
+
+	// Seam-C: huddles hand off to vulos-meet (no A/V hosted here). GET reports
+	// whether video is configured (the SPA disables the action otherwise); POST
+	// mints a per-channel Meet join (membership-checked) and returns a deep link
+	// the SPA embeds in an iframe with Talk-backed in-call chat. See backend/meet.
+	meetCfg := meet.FromEnv()
+	if meetCfg.Enabled() {
+		log.Printf("[seam-C] huddles → vulos-meet (mode=%s)", meetCfg.Mode())
+	} else {
+		log.Printf("[seam-C] huddles disabled (no vulos-meet configured); chat + Spaces only")
+	}
+	huddleHandler := handlers.NewHuddleHandler(spacesHandler.Store(), cfg, meetCfg)
+	protected.GET("/meet/config", huddleHandler.Config)
+	protected.POST("/spaces/channels/:channelId/huddle", huddleHandler.Start)
 
 	// -----------------------------------------------------------------------
 	// Apps & Bots platform: the shared @vulos/apps platform Talk now hosts as

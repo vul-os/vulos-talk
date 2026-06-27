@@ -1,8 +1,10 @@
 /**
  * src/shells/TalkShell.jsx — talk.vulos.org standalone shell (Spaces)
  *
- * Full Spaces experience: channels, DMs, threads, calls, meetings.
- * Routes: / /channels/:id /dm/:id /room/:id /meet/:id
+ * Spaces experience: channels, DMs, threads, and huddles. Real-time A/V is NOT
+ * hosted here — a huddle hands off to the dedicated vulos-meet product, embedded
+ * in an iframe within the channel (seam-C). See ChannelView's HuddlePanel.
+ * Routes: / /channels/:id /dm/:id
  *
  * Wrapped in RequireAuth — redirects to app.vulos.org/login on 401.
  *
@@ -16,8 +18,6 @@ import RequireAuth from './RequireAuth.jsx'
 import { Toaster } from '../lib/toast.jsx'
 
 const SpacesApp = lazy(() => import('../apps/spaces/SpacesApp.jsx'))
-const Room      = lazy(() => import('../apps/spaces/Room.jsx'))
-const Meetings  = lazy(() => import('../apps/spaces/Meetings.jsx'))
 const BotsApp   = lazy(() => import('../apps/bots/BotsApp.jsx'))
 
 function Loading() {
@@ -37,8 +37,6 @@ export default function TalkShell() {
             <Route path="/" element={<SpacesApp />} />
             <Route path="/channels/:id" element={<SpacesApp />} />
             <Route path="/dm/:id" element={<SpacesApp />} />
-            <Route path="/room/:id" element={<Room />} />
-            <Route path="/meet/:id" element={<Meetings />} />
             <Route path="/apps" element={<BotsApp />} />
             <Route path="/settings/bots" element={<BotsApp />} />
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -9,7 +9,9 @@
  *   - Best-effort typing indicators (cross-tab BroadcastChannel)
  *   - Read/unread with a "New" divider + jump-to-unread button
  *   - Best-effort link previews, copy-message-link
- *   - Huddle button → /meet/:id (see TODO(seam-C))
+ *   - Huddle button → seam-C handoff to vulos-meet, embedded in an iframe
+ *     (HuddlePanel) with Talk-backed in-call chat; disabled when Meet is not
+ *     configured. Talk hosts no real-time A/V itself.
  *   - Thread panel with an "also send to channel" checkbox
  *   - Responsive: 3-pane desktop, full-screen composer + overlay thread on mobile
  */
@@ -19,8 +21,8 @@ import {
   Pin, Bell, UserPlus, AlignLeft, Eye, Headphones, ArrowDown, ArrowLeft, Smile, Slash,
   Bold, Italic, Strikethrough, Code, Link as LinkIcon, List, Quote, Paperclip,
 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
 import MessageList from './MessageList.jsx'
+import HuddlePanel from './HuddlePanel.jsx'
 import MentionPicker, { parseMentionQuery, insertMention } from './MentionPicker.jsx'
 import SlashCommandPicker, { parseSlashQuery, completeSlash } from './SlashCommandPicker.jsx'
 import SearchBar from './SearchBar.jsx'
@@ -325,7 +327,6 @@ function InviteMemberModal({ open, onClose, channelId, roster = [], onInvited })
 // ---- ChannelView -------------------------------------------------------------
 
 export default function ChannelView({ channel, currentUser, roster = [], onStatusChange, onMobileBack }) {
-  const navigate = useNavigate()
   const [messages, setMessages] = useState([])
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
@@ -349,6 +350,9 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
   const [commands, setCommands] = useState([])
   const [lastReadClock, setLastReadClock] = useState(null)
   const [tab, setTab] = useState('messages') // 'messages' | 'board'
+  const [huddleEnabled, setHuddleEnabled] = useState(false) // seam-C: video configured?
+  const [huddleStarting, setHuddleStarting] = useState(false)
+  const [huddle, setHuddle] = useState(null) // { joinUrl } when a huddle is open
 
   const bottomRef = useRef(null)
   const pollRef = useRef(null)
@@ -385,6 +389,13 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
   useEffect(() => {
     let alive = true
     api.spacesListCommands().then((cmds) => { if (alive) setCommands(cmds || []) }).catch(() => { if (alive) setCommands([]) })
+    return () => { alive = false }
+  }, [])
+
+  // Seam-C: is video (vulos-meet) configured? Disables the Huddle action when not.
+  useEffect(() => {
+    let alive = true
+    api.meetConfig().then((c) => { if (alive) setHuddleEnabled(!!c?.enabled) }).catch(() => { if (alive) setHuddleEnabled(false) })
     return () => { alive = false }
   }, [])
 
@@ -643,12 +654,30 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
     e.target.value = ''
   }
 
-  function startHuddle() {
-    // TODO(seam-C): route huddle audio/video through vulos-meet rather than the
-    // standalone Meetings flow — for now we navigate to the existing /meet/:id
-    // room keyed by the channel so a huddle reuses the call surface.
-    toast.info('Starting huddle…')
-    navigate(`/meet/${channel.id}`)
+  // Seam-C: hand off to vulos-meet. The backend mints a per-channel Meet join
+  // and returns a deep link we embed in an iframe (HuddlePanel), with Meet's
+  // in-call chat pointed back at this channel. Degrades gracefully when video is
+  // not configured.
+  async function startHuddle() {
+    if (huddleStarting || huddle) return
+    if (!huddleEnabled) {
+      toast.error('Video is not configured for this workspace')
+      return
+    }
+    setHuddleStarting(true)
+    try {
+      const res = await api.startHuddle(channel.id)
+      if (!res?.enabled || !res?.join_url) {
+        setHuddleEnabled(false)
+        toast.error('Video is not configured for this workspace')
+        return
+      }
+      setHuddle({ joinUrl: res.join_url })
+    } catch (e) {
+      toast.error(e.message || 'Could not start the huddle')
+    } finally {
+      setHuddleStarting(false)
+    }
   }
 
   // ---- mention/slash roster ---------------------------------------------------
@@ -716,7 +745,14 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
               <div className="flex items-center gap-1">
                 <MemberStack members={members} roster={roster} onClick={() => channel.type === 'private' ? setShowInvite(true) : undefined} />
                 <span className="w-px h-5 bg-line mx-0.5 hidden md:block" />
-                <button type="button" onClick={startHuddle} className={headerActionBtn(false)} title="Start a huddle" aria-label="Start a huddle">
+                <button
+                  type="button"
+                  onClick={startHuddle}
+                  disabled={!huddleEnabled || huddleStarting}
+                  className={[headerActionBtn(!!huddle), 'disabled:opacity-40 disabled:cursor-not-allowed'].join(' ')}
+                  title={huddleEnabled ? 'Start a huddle' : 'Video not configured'}
+                  aria-label={huddleEnabled ? 'Start a huddle' : 'Huddle unavailable — video not configured'}
+                >
                   <Headphones size={14} />
                 </button>
                 <button type="button" onClick={() => setShowSearch((v) => !v)} className={headerActionBtn(showSearch)} title="Search in channel" aria-label="Search in channel">
@@ -937,6 +973,10 @@ export default function ChannelView({ channel, currentUser, roster = [], onStatu
       {tab === 'messages' && showPinned && <PinnedPanel pinnedMsgs={pinnedMsgs} onJump={jumpToMessage} onUnpin={handleUnpin} onClose={() => setShowPinned(false)} />}
 
       <InviteMemberModal open={showInvite} onClose={() => setShowInvite(false)} channelId={channel.id} roster={displayRoster} onInvited={loadMembers} />
+
+      {huddle && (
+        <HuddlePanel joinUrl={huddle.joinUrl} channelName={channel.name} onClose={() => setHuddle(null)} />
+      )}
     </div>
   )
 }

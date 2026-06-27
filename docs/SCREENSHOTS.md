@@ -58,7 +58,8 @@ only honest way to attribute seeded messages to different people.
 
 ## Limitations
 
-Live **huddle video** (WebRTC media) and real-time **websocket presence** cannot
-be reproduced headlessly, so `huddles.png` shows the scheduling dashboard rather
-than an in-call view, and presence reflects only the demo screenshot session.
-Everything else is real, seeded data served by the Go binary.
+Live **huddle video** (handed off to the embedded **Vulos Meet** client) and
+real-time **websocket presence** cannot be reproduced headlessly, so any huddle
+shot shows the channel with the Huddle action rather than an in-call view, and
+presence reflects only the demo screenshot session. Everything else is real,
+seeded data served by the Go binary.
