@@ -5,20 +5,23 @@
  * channel. One board per channel: boardId === channelId, so everyone viewing a
  * channel's "Board" tab edits the same shared document.
  *
- * Transport — websocket (board sync server), see Step-3 note below.
+ * Transport — the Vulos Board sync server (canonical).
  * ───────────────────────────────────────────────────────────────────────────
- * TODO(seam): route board collab over @vulos/relay-client.
- *   The intended end-state (per board-ui's own provider.ts note) is for Talk to
- *   own the transport and pump Y.Doc diffs over the Vulos Relay peer-fabric,
- *   the same fabric calls/presence ride on — i.e. a custom Y.Doc provider that:
- *     • outbound: doc.on('update', (u, origin) => { if (origin!=='remote') relaySend(u) })
- *     • inbound:  relay 'message' bytes → Y.applyUpdate(doc, bytes, 'remote')
- *     • late-join: on a new peer, broadcast Y.encodeStateAsUpdate(doc)
- *   That requires standing up a relay FabricClient for a `board:<channelId>`
- *   session (signaling URL + identity/auth + ICE), which Talk does not wire for
- *   channels today (presence is REST-poll; calls use media-only createCall).
- *   Until that fabric path exists, we use the board sync server below, which
- *   gives a fully-working collaborative board now.
+ * Collaboration rides the production board sync server (Go, reearth/ygo) over a
+ * y-websocket connection. That server is a centralized CRDT authority that also
+ * persists each board to the object bucket (board/<room>.bin) and authorizes
+ * connections with an HMAC token. For a persistent, server-backed channel board
+ * this is the complete and preferred design — NOT a stopgap. (@vulos/board-ui
+ * is transport-agnostic: Workspace + Talk use this ygo server; Meet syncs its
+ * ephemeral in-call board over the LiveKit data channel instead.)
+ *
+ * Future, optional — cross-INSTANCE federation: boards could additionally sync
+ * between separate Vulos instances by pumping Y.Doc updates over
+ * @vulos/relay-client's peer fabric (mirroring the Vulos Files relay-p2p seam),
+ * via a custom Y.Doc provider (outbound doc.on('update') fanout; inbound
+ * Y.applyUpdate(doc, bytes, 'remote'); late-join Y.encodeStateAsUpdate). That is
+ * a distinct federation capability, not a gap in this surface — within one
+ * instance the ygo server above is authoritative and sufficient.
  */
 import { useMemo, useEffect, useState } from 'react'
 import { BoardApp, createBoardDoc, createWebsocketProvider } from '@vulos/board-ui'
