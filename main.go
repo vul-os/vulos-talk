@@ -40,6 +40,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/vul-os/vulos-apps/appsplatform"
+	"github.com/vul-os/vulos-apps/mcp"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=vX.Y.Z".
@@ -271,6 +272,24 @@ func main() {
 	// its own auth, so it is not behind the gin protected group).
 	r.Any("/api/apps", gin.WrapH(appsHandler))
 	r.Any("/api/apps/*any", gin.WrapH(appsHandler))
+
+	// MCP surface: the SAME Talk adapter + registry, a different shape over the
+	// seam. Lets any LLM/agent operate Talk over the Model Context Protocol
+	// (JSON-RPC over Streamable HTTP) — Act actions become MCP tools, Read kinds
+	// become MCP resources, authed by the SAME Bearer app token (vat_). The
+	// cloud-aggregation gateway is left as an env-gated seam (MCPConfig.Gateway);
+	// the open-core build wires none, so it runs standalone.
+	mcpHandler, err := mcp.NewHandler(mcp.MCPConfig{
+		Adapter:  talkAdapter,
+		Registry: appsRegistry,
+		Emit:     appsDispatcher.EmitFunc(),
+		BasePath: "/mcp",
+	})
+	if err != nil {
+		log.Fatalf("mcp mount failed: %v", err)
+	}
+	r.Any("/mcp", gin.WrapH(mcpHandler))
+	r.Any("/mcp/*any", gin.WrapH(mcpHandler))
 
 	// Legacy admin API (session-authed, owner-scoped) — COMPAT shim over the
 	// same registry; the canonical surface is /api/apps.

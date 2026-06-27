@@ -22,6 +22,7 @@ import (
 	"vulos-talk/backend/models"
 
 	"github.com/vul-os/vulos-apps/appsplatform"
+	"github.com/vul-os/vulos-apps/mcp"
 )
 
 // Talk action / read kinds carried in the generic platform envelopes. The Talk
@@ -47,6 +48,77 @@ func NewTalkAdapter(spaces *SpacesHandlerExt) *TalkAdapter { return &TalkAdapter
 
 // Product identifies this adapter's product.
 func (a *TalkAdapter) Product() string { return appsplatform.ProductTalk }
+
+// MCPTools publishes Talk's Act actions as MCP tools (mcp.Descriptor). Each tool
+// maps 1:1 onto a TalkAdapter.Act action: its arguments object becomes the
+// action Payload, and AcceptsTarget lifts a "target" channel id into
+// ActionRequest.Target (access-checked via CanAccessTarget before Act runs).
+func (a *TalkAdapter) MCPTools() []mcp.ToolSpec {
+	return []mcp.ToolSpec{
+		{
+			Action:        ActMessagePost,
+			Description:   "Post a chat message to a Talk channel. Set `target` to the channel id and `text` to the message body; optionally thread a reply with `thread_parent`.",
+			AcceptsTarget: true,
+			InputSchema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "text": {"type": "string", "description": "Message body to post."},
+    "thread_parent": {"type": "string", "description": "Optional parent message id to reply in a thread."}
+  },
+  "required": ["text"]
+}`),
+		},
+		{
+			Action:        ActReactionAdd,
+			Description:   "Add an emoji reaction to a message in a Talk channel. Set `target` to the channel id, `message_id` to the message, and `emoji` to the reaction.",
+			AcceptsTarget: true,
+			InputSchema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "message_id": {"type": "string", "description": "Id of the message to react to."},
+    "emoji": {"type": "string", "description": "Emoji shortcode or character for the reaction."}
+  },
+  "required": ["message_id", "emoji"]
+}`),
+		},
+		{
+			Action:        ActReactionRemove,
+			Description:   "Remove an emoji reaction previously added by this app from a message. Set `target` to the channel id, `message_id` to the message, and `emoji` to the reaction.",
+			AcceptsTarget: true,
+			InputSchema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "message_id": {"type": "string", "description": "Id of the message to remove the reaction from."},
+    "emoji": {"type": "string", "description": "Emoji shortcode or character of the reaction to remove."}
+  },
+  "required": ["message_id", "emoji"]
+}`),
+		},
+	}
+}
+
+// MCPResources publishes Talk's Read kinds as MCP resources (mcp.Descriptor).
+// "channels" lists the channels visible to the app; "history" and "members" are
+// addressed with a channel target (vulos://talk/<kind>/<channel>), which is
+// access-checked via CanAccessTarget before Read.
+func (a *TalkAdapter) MCPResources() []mcp.ResourceSpec {
+	return []mcp.ResourceSpec{
+		{
+			Kind:        ReadChannels,
+			Description: "Channels visible to this app (public channels plus private/DM channels it is a member of).",
+		},
+		{
+			Kind:          ReadHistory,
+			Description:   "Recent message history for a channel. Append the channel id as the target; pass ?limit=N (max 200) for page size.",
+			AcceptsTarget: true,
+		},
+		{
+			Kind:          ReadMembers,
+			Description:   "Membership roster for a channel. Append the channel id as the target.",
+			AcceptsTarget: true,
+		},
+	}
+}
 
 // RequiredScope maps a Talk action/read kind to the scope it needs.
 func (a *TalkAdapter) RequiredScope(actionOrKind string) string {
