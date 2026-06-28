@@ -33,19 +33,21 @@ repo
 
 ## Request flow
 
-```
-Browser (React SPA, same origin)
-   │  fetch /api/... (credentials: include)
-   ▼
-gin router (main.go)
-   ├── CORS (allow-all without credentials, or explicit allowlist when VULOS_TALK_CORS_ORIGINS is set)
-   ├── /api/auth/status, /api/auth/me        (unauthenticated status surface)
-   ├── middleware.Auth (only when auth.enabled)   ──▶ verifies HS256 JWT (Authorization header or `session` cookie)
-   │        sets the verified account id from the token subject (never a client header)
-   ├── /api/spaces/*     ──▶ spaces.Store (SQLite)         channels, messages, threads, reactions, pins, search, presence
-   ├── /api/meet/config  ──▶ meet seam                     whether Vulos Meet is configured
-   ├── /api/spaces/channels/:id/huddle ──▶ meet seam       seam-C: mint VULOS-MEET/1 join (handoff to Vulos Meet)
-   └── NoRoute           ──▶ embedded dist/ (SPA, history-API fallback to index.html)
+```mermaid
+flowchart TD
+    Browser["Browser (React SPA, same origin)"] -->|"fetch /api/... (credentials: include)"| Router["gin router (main.go)"]
+    Router --> CORS["CORS (allow-all without credentials, or explicit allowlist when VULOS_TALK_CORS_ORIGINS is set)"]
+    Router --> AuthStatus["/api/auth/status, /api/auth/me (unauthenticated status surface)"]
+    Router --> Auth["middleware.Auth (only when auth.enabled): verifies HS256 JWT (Authorization header or session cookie); sets the verified account id from the token subject (never a client header)"]
+    Router --> Spaces["/api/spaces/*"]
+    Router --> MeetCfg["/api/meet/config"]
+    Router --> Huddle["/api/spaces/channels/:id/huddle"]
+    Router --> NoRoute["NoRoute"]
+
+    Spaces --> Store["spaces.Store (SQLite): channels, messages, threads, reactions, pins, search, presence"]
+    MeetCfg --> MeetSeam1["meet seam: whether Vulos Meet is configured"]
+    Huddle --> MeetSeam2["meet seam — seam-C: mint VULOS-MEET/1 join (handoff to Vulos Meet)"]
+    NoRoute --> Dist["embedded dist/ (SPA, history-API fallback to index.html)"]
 ```
 
 The SPA shell (`TalkShell`) wraps everything in `RequireAuth`, which probes

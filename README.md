@@ -168,24 +168,27 @@ npm run dev:web   # Vite on :5175 proxying /api → :8080
 
 ## Architecture
 
-```
-                ┌────────────────────────── vulos-talk (one Go binary) ──────────────────────────┐
-   Browser ──▶  │  gin HTTP server                                                                │
-   (React SPA)  │   ├── /api/auth/*        minimal status/me (no login UI; redirects to identity) │
-                │   ├── /api/spaces/*      channels · DMs · messages · threads · reactions · pins  │
-                │   │                      · status · search · presence · slash-commands           │
-                │   │                                                       ──▶  CRDT SpacesStore   │
-                │   ├── /api/bots          bot/app admin (create · rotate · scopes · webhooks)      │
-                │   ├── /api/bot/v1/*      bot REST API (Bearer bot-token) + SSE event stream       │
-                │   ├── /api/bot/hooks/*   per-bot incoming webhooks  ──▶  bots.Registry (seam)     │
-                │   ├── /api/meet/config   whether Vulos Meet is configured                       │
-                │   ├── …/channels/:id/huddle  seam-C: mint VULOS-MEET/1 join → Vulos Meet        │
-                │   ├── /metrics /version  Prometheus + build info                                 │
-                │   └── //go:embed dist    serves the built React SPA (history-API fallback)       │
-                │                                                                                   │
-                │  seam/  ── standalone by default (local JWT, unlimited entitlements, no-op usage) │
-                │            optional vulos-cloud control plane (separate adapter; never imported)  │
-                └───────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Browser["Browser (React SPA)"] --> Gin
+
+    subgraph Binary["vulos-talk (one Go binary)"]
+        Gin["gin HTTP server"]
+        Gin --> Auth["/api/auth/* — minimal status/me (no login UI; redirects to identity)"]
+        Gin --> Spaces["/api/spaces/* — channels · DMs · messages · threads · reactions · pins · status · search · presence · slash-commands"]
+        Gin --> Bots["/api/bots — bot/app admin (create · rotate · scopes · webhooks)"]
+        Gin --> BotV1["/api/bot/v1/* — bot REST API (Bearer bot-token) + SSE event stream"]
+        Gin --> BotHooks["/api/bot/hooks/* — per-bot incoming webhooks"]
+        Gin --> MeetCfg["/api/meet/config — whether Vulos Meet is configured"]
+        Gin --> Huddle[".../channels/:id/huddle — seam-C: mint VULOS-MEET/1 join → Vulos Meet"]
+        Gin --> Metrics["/metrics /version — Prometheus + build info"]
+        Gin --> Embed["//go:embed dist — serves the built React SPA (history-API fallback)"]
+
+        Spaces --> Store["CRDT SpacesStore"]
+        BotHooks --> Registry["bots.Registry (seam)"]
+
+        Seam["seam/ — standalone by default (local JWT, unlimited entitlements, no-op usage); optional vulos-cloud control plane (separate adapter; never imported)"]
+    end
 ```
 
 Full detail and the seam-C huddle/video handoff: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
