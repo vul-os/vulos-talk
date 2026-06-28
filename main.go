@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"vulos-talk/backend/billing"
 	"vulos-talk/backend/config"
@@ -112,10 +113,50 @@ func main() {
 	}
 	r.Use(cors.New(corsCfg))
 
-	// Prometheus metrics + version (no auth).
+	// -----------------------------------------------------------------------
+	// Rate limiting: per-user / per-IP token buckets.
+	//
+	// Three independent stores cover three trust surfaces:
+	//   spacesWriteRL — authenticated user writes (send, edit, react, pin, …)
+	//   botAPIRL      — bot REST API (per bot-token)
+	//   webhookRL     — unauthenticated incoming webhooks (per source IP)
+	//
+	// When rate_limit.enabled is false (e.g. local dev) all three are no-ops
+	// so the route wiring below is always uniform.
+	// -----------------------------------------------------------------------
+	noop := func(c *gin.Context) { c.Next() }
+	spacesWriteRL := gin.HandlerFunc(noop)
+	botAPIRL := gin.HandlerFunc(noop)
+	webhookRL := gin.HandlerFunc(noop)
+
+	if cfg.RateLimit.Enabled {
+		const bucketTTL = 10 * time.Minute
+		swStore := middleware.NewBucketStore(
+			cfg.RateLimit.SpacesWritesPerSec, cfg.RateLimit.SpacesWritesBurst, bucketTTL)
+		spacesWriteRL = middleware.RateLimit(swStore, middleware.UserOrIPKey)
+		log.Printf("[ratelimit] spaces writes: %.1f/s burst=%d", cfg.RateLimit.SpacesWritesPerSec, cfg.RateLimit.SpacesWritesBurst)
+
+		baStore := middleware.NewBucketStore(
+			cfg.RateLimit.BotAPIPerSec, cfg.RateLimit.BotAPIBurst, bucketTTL)
+		botAPIRL = middleware.RateLimit(baStore, middleware.BotTokenKey)
+		log.Printf("[ratelimit] bot API:     %.1f/s burst=%d", cfg.RateLimit.BotAPIPerSec, cfg.RateLimit.BotAPIBurst)
+
+		whStore := middleware.NewBucketStore(
+			cfg.RateLimit.WebhookPerSec, cfg.RateLimit.WebhookBurst, bucketTTL)
+		webhookRL = middleware.RateLimit(whStore, middleware.IPKey)
+		log.Printf("[ratelimit] webhooks:    %.1f/s burst=%d (per IP)", cfg.RateLimit.WebhookPerSec, cfg.RateLimit.WebhookBurst)
+	} else {
+		log.Printf("[ratelimit] disabled (rate_limit.enabled=false)")
+	}
+
+	// Prometheus metrics, version, and health (no auth).
 	r.GET("/metrics", gin.WrapH(obs.Handler()))
 	r.GET("/version", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"version": Version})
+	})
+	// /healthz is used by load-balancers and the status page.
+	r.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": Version})
 	})
 
 	// Auth status surface (unauthenticated). Talk does not host login — the
@@ -145,24 +186,24 @@ func main() {
 	protected.POST("/spaces/channels/:channelId/members", spacesHandler.InviteMember)
 	protected.PUT("/spaces/channels/:channelId/members/me/name", spacesHandler.SetMyDisplayName)
 	protected.GET("/spaces/channels/:channelId/messages", spacesHandler.ListMessages)
-	protected.POST("/spaces/channels/:channelId/messages", spacesHandler.SendMessage)
-	protected.PUT("/spaces/channels/:channelId/messages/:msgId", spacesHandler.EditMessage)
-	protected.DELETE("/spaces/channels/:channelId/messages/:msgId", spacesHandler.DeleteMessage)
+	protected.POST("/spaces/channels/:channelId/messages", spacesWriteRL, spacesHandler.SendMessage)
+	protected.PUT("/spaces/channels/:channelId/messages/:msgId", spacesWriteRL, spacesHandler.EditMessage)
+	protected.DELETE("/spaces/channels/:channelId/messages/:msgId", spacesWriteRL, spacesHandler.DeleteMessage)
 	protected.POST("/spaces/channels/:channelId/read", spacesHandler.MarkRead)
 	protected.GET("/spaces/channels/:channelId/read", spacesHandler.GetReadState)
 	protected.GET("/spaces/channels/:channelId/ops", spacesHandler.ExportOps)
 	protected.POST("/spaces/ops", spacesHandler.MergeOps)
 	protected.GET("/spaces/channels/:channelId/reactions", spacesHandler.ListReactions)
-	protected.POST("/spaces/messages/:msgId/react", spacesHandler.React)
-	protected.DELETE("/spaces/messages/:msgId/react", spacesHandler.Unreact)
+	protected.POST("/spaces/messages/:msgId/react", spacesWriteRL, spacesHandler.React)
+	protected.DELETE("/spaces/messages/:msgId/react", spacesWriteRL, spacesHandler.Unreact)
 	protected.GET("/spaces/channels/:channelId/pins", spacesHandler.ListPins)
-	protected.POST("/spaces/channels/:channelId/pins", spacesHandler.PinMessage)
-	protected.DELETE("/spaces/channels/:channelId/pins/:msgId", spacesHandler.UnpinMessage)
+	protected.POST("/spaces/channels/:channelId/pins", spacesWriteRL, spacesHandler.PinMessage)
+	protected.DELETE("/spaces/channels/:channelId/pins/:msgId", spacesWriteRL, spacesHandler.UnpinMessage)
 	protected.PUT("/spaces/users/me/status", spacesHandler.SetStatus)
 	protected.GET("/spaces/users/:userId/status", spacesHandler.GetStatus)
 	protected.GET("/spaces/channels/:channelId/search", spacesHandler.SearchMessages)
 	protected.GET("/spaces/channels/:channelId/threads/:parentId", spacesHandler.ListThread)
-	protected.POST("/spaces/channels/:channelId/threads/:parentId/reply", spacesHandler.ReplyThread)
+	protected.POST("/spaces/channels/:channelId/threads/:parentId/reply", spacesWriteRL, spacesHandler.ReplyThread)
 
 	// Seam-C: huddles hand off to vulos-meet (no A/V hosted here). GET reports
 	// whether video is configured (the SPA disables the action otherwise); POST
@@ -275,6 +316,7 @@ func main() {
 	botAPIHandler := handlers.NewBotAPIHandler(spacesHandler, appsRegistry, appsSink)
 	botV1 := api.Group("/bot/v1")
 	botV1.Use(middleware.BotAuth(appsRegistry))
+	botV1.Use(botAPIRL)
 	botV1.GET("/auth.test", botAPIHandler.AuthTest)
 	botV1.POST("/messages", botAPIHandler.PostMessage)
 	botV1.GET("/channels", botAPIHandler.ListChannels)
@@ -287,7 +329,8 @@ func main() {
 	botV1.GET("/events", botEventsHandler.Stream)
 
 	// Incoming webhooks: NO auth header — the webhook id in the path is the secret.
-	api.POST("/bot/hooks/:webhookId", botAPIHandler.IncomingWebhook)
+	// Rate-limited per source IP to resist unauthenticated abuse.
+	api.POST("/bot/hooks/:webhookId", webhookRL, botAPIHandler.IncomingWebhook)
 
 	// Serve the embedded SPA (history-API fallback to index.html).
 	staticFS, err := fs.Sub(distFS, "dist")

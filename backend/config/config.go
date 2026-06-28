@@ -7,9 +7,37 @@ import (
 )
 
 type Config struct {
-	Server  ServerConfig  `yaml:"server"`
-	Auth    AuthConfig    `yaml:"auth"`
-	Storage StorageConfig `yaml:"storage"`
+	Server    ServerConfig    `yaml:"server"`
+	Auth      AuthConfig      `yaml:"auth"`
+	Storage   StorageConfig   `yaml:"storage"`
+	RateLimit RateLimitConfig `yaml:"rate_limit"`
+}
+
+// RateLimitConfig controls the token-bucket rate limiters applied to write
+// and unauthenticated endpoints.  All limits are zero-values-safe: when
+// Enabled is false the middleware is bypassed entirely.
+type RateLimitConfig struct {
+	// Enabled activates rate limiting globally.  Defaults to true.
+	Enabled bool `yaml:"enabled"`
+
+	// SpacesWritesPerSec is the sustained token refill rate (tokens/second)
+	// for authenticated Spaces write operations (send, edit, react, pin, …),
+	// keyed per user ID (or IP when auth is disabled).
+	SpacesWritesPerSec float64 `yaml:"spaces_writes_per_sec"`
+	// SpacesWritesBurst is the maximum burst depth for Spaces writes.
+	SpacesWritesBurst int `yaml:"spaces_writes_burst"`
+
+	// BotAPIPerSec is the sustained refill rate for the bot REST API
+	// (/api/bot/v1/*), keyed per bot token prefix.
+	BotAPIPerSec float64 `yaml:"bot_api_per_sec"`
+	// BotAPIBurst is the maximum burst depth for the bot API.
+	BotAPIBurst int `yaml:"bot_api_burst"`
+
+	// WebhookPerSec is the sustained refill rate for unauthenticated incoming
+	// webhooks (/api/bot/hooks/*), keyed per source IP.
+	WebhookPerSec float64 `yaml:"webhook_per_sec"`
+	// WebhookBurst is the maximum burst depth for incoming webhooks.
+	WebhookBurst int `yaml:"webhook_burst"`
 }
 
 type ServerConfig struct {
@@ -73,6 +101,21 @@ func Default() *Config {
 				Port:    5432,
 				SSLMode: "disable",
 			},
+		},
+		RateLimit: RateLimitConfig{
+			Enabled: true,
+			// Spaces writes: 10 messages/second sustained, burst of 30.
+			// Generous enough for power users; tight enough to block floods.
+			SpacesWritesPerSec: 10,
+			SpacesWritesBurst:  30,
+			// Bot API: 20 calls/second sustained, burst of 60.
+			// Bots often send bursts on startup; higher ceiling than human writes.
+			BotAPIPerSec: 20,
+			BotAPIBurst:  60,
+			// Incoming webhooks: 2/second sustained, burst of 10.
+			// Unauthenticated — conservative to resist abuse from unknown sources.
+			WebhookPerSec: 2,
+			WebhookBurst:  10,
 		},
 	}
 }
