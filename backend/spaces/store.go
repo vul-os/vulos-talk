@@ -35,6 +35,20 @@ import (
 // store's ErrNotMember sentinel for the MemberNamer seam.
 var ErrMemberNotFound = errors.New("spaces: membership not found")
 
+// MaxMessageBytes caps the size of a single user-authored message body on the
+// local write path (SendMessage / EditMessage). Chat messages are small; an
+// unbounded body is a memory/DoS amplification vector (one POST can pin an
+// arbitrarily large blob in the in-memory index and the durable log). 64 KiB is
+// far above any legitimate chat message yet bounds the blast radius. The merge
+// path (applyRemote) is intentionally NOT capped here: rejecting a peer's op
+// mid-stream would break CRDT convergence; replication trust is enforced
+// upstream (MergeOpsAs author binding + channel membership gating).
+const MaxMessageBytes = 64 * 1024
+
+// ErrMessageTooLarge is returned by SendMessage / EditMessage when the body
+// exceeds MaxMessageBytes.
+var ErrMessageTooLarge = fmt.Errorf("spaces: message body exceeds %d bytes", MaxMessageBytes)
+
 // -------------------------------------------------------------------------
 // Hybrid Logical Clock (simple wall+counter variant)
 // -------------------------------------------------------------------------
@@ -443,6 +457,9 @@ func (s *SpacesStore) SendMessage(channelID, authorID, body, threadParent string
 	if _, ok := s.channels[channelID]; !ok {
 		return nil, fmt.Errorf("channel not found: %s", channelID)
 	}
+	if len(body) > MaxMessageBytes {
+		return nil, ErrMessageTooLarge
+	}
 	now := time.Now()
 	msg := &models.Message{
 		ID:           uuid.NewString(),
@@ -481,6 +498,9 @@ func (s *SpacesStore) EditMessage(channelID, msgID, newBody string) (*models.Mes
 	}
 	if existing.State == models.MessageStateTombed {
 		return nil, fmt.Errorf("cannot edit a deleted message")
+	}
+	if len(newBody) > MaxMessageBytes {
+		return nil, ErrMessageTooLarge
 	}
 	updated := *existing
 	updated.Body = newBody
