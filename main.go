@@ -55,6 +55,11 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		runMigrate(os.Args[2:])
+		return
+	}
+
 	log.Printf("vulos-talk %s starting", Version)
 	obs.Init()
 
