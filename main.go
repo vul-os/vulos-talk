@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"vulos-talk/backend/apikey"
 	"vulos-talk/backend/billing"
 	"vulos-talk/backend/config"
 	"vulos-talk/backend/handlers"
@@ -92,6 +93,16 @@ func main() {
 		log.Printf("[seam] integration mode: standalone (no control plane)")
 	}
 	billing.Configure(provider)
+
+	// API-key introspection seam: build the introspector from the SAME
+	// VULOS_CP_BASE_URL env that the cloud billing/entitlements seam uses.
+	// Returns nil (disabled) when unset — existing session-only auth unchanged.
+	intro := apikey.NewIntrospector(apikey.FromEnv())
+	if intro != nil {
+		log.Printf("[apikey] vk_ API-key auth enabled (introspection via %s)", apikey.FromEnv().BaseURL)
+	} else {
+		log.Printf("[apikey] vk_ API-key auth disabled (VULOS_CP_BASE_URL not set; session-only)")
+	}
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
@@ -172,10 +183,12 @@ func main() {
 	api.GET("/auth/me", authHandler.Me)
 
 	// Protected API routes.
+	// TalkAuth accepts EITHER a session JWT (existing behaviour) OR a
+	// cloud-issued `Authorization: Bearer vk_…` API key validated via the
+	// introspection seam. When intro is nil (VULOS_CP_BASE_URL not set) the
+	// vk_ path is disabled and only session auth applies — self-host unchanged.
 	protected := api.Group("/")
-	if cfg.Auth.Enabled {
-		protected.Use(middleware.Auth(cfg))
-	}
+	protected.Use(middleware.TalkAuth(cfg, intro))
 
 	// Presence (REST/poll heartbeat + roster) for Spaces.
 	presenceHandler := handlers.NewPresenceHandler()
@@ -320,6 +333,10 @@ func main() {
 	// published BOT-API + the echo-bot example keep working.
 	botAPIHandler := handlers.NewBotAPIHandler(spacesHandler, appsRegistry, appsSink)
 	botV1 := api.Group("/bot/v1")
+	// APIKeyAuth intercepts `Authorization: Bearer vk_…` before BotAuth so
+	// developers can drive the bot API with a cloud-issued API key. BotAuth
+	// short-circuits when CtxAuthenticated is already set by APIKeyAuth.
+	botV1.Use(middleware.APIKeyAuth(intro))
 	botV1.Use(middleware.BotAuth(appsRegistry))
 	botV1.Use(botAPIRL)
 	botV1.GET("/auth.test", botAPIHandler.AuthTest)

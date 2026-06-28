@@ -18,8 +18,17 @@ const CtxBot = "bot"
 // token's sha256 HASH (the plaintext is never stored), and requires the app to
 // target Talk. On any miss it aborts with 401 (403 if the token is valid but the
 // app does not target Talk); on success it sets the app in the context (CtxBot).
+//
+// When APIKeyAuth has already authenticated the request via a vk_ API key
+// (CtxAuthenticated is true), BotAuth passes through immediately so both auth
+// schemes can coexist on the same route group.
 func BotAuth(reg appsplatform.Registry) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// vk_ API-key path: APIKeyAuth already set identity — skip bot auth.
+		if c.GetBool(CtxAuthenticated) {
+			c.Next()
+			return
+		}
 		token := bearerToken(c)
 		if token == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "bot token required"})

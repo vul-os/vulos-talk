@@ -10,6 +10,34 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// SessionIdentity verifies the HS256 session token extracted from r and
+// returns (subject, isAdmin, ok).  It is the shared verification helper used
+// by both Auth (gin middleware) and TalkAuth (which also needs to fall through
+// to session verification after ruling out a vk_ API key).
+func SessionIdentity(cfg *config.Config, token string) (subject string, isAdmin bool, ok bool) {
+	secret, err := JWTSecret()
+	if err != nil {
+		return "", false, false
+	}
+	claims := &jwt.RegisteredClaims{}
+	parsed, perr := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrTokenSignatureInvalid
+		}
+		return secret, nil
+	})
+	if perr != nil || !parsed.Valid {
+		return "", false, false
+	}
+	for _, aud := range claims.Audience {
+		if aud == "vulos:admin" {
+			isAdmin = true
+			break
+		}
+	}
+	return claims.Subject, isAdmin, true
+}
+
 // Context keys set by Auth so downstream handlers can read the verified
 // identity. Handlers must read the user/account id from context — never from
 // the client-supplied X-Account-ID header.
