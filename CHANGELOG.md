@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-06-28
+
 ### Added
 - **Seam-C: huddles → Vulos Meet.** Talk no longer hosts real-time audio/video.
   Starting a huddle in a channel derives a deterministic Meet room, mints a
