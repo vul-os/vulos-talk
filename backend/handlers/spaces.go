@@ -465,6 +465,10 @@ func (h *SpacesHandler) MergeOps(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if len(ops) > spaces.MaxMergeOpsPerBatch {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "op batch too large"})
+		return
+	}
 	requester := requesterID(c)
 	// Enforce channel membership for every channel touched by the batch before
 	// applying anything. An op targeting a NON-EXISTENT channel is rejected: the

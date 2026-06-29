@@ -182,6 +182,19 @@ func main() {
 	api.GET("/auth/status", authHandler.Status)
 	api.GET("/auth/me", authHandler.Me)
 
+	// Global HTTP body-size cap on the /api group.  This bounds every
+	// ShouldBindJSON call before the handler even reads a byte, preventing a
+	// single unauthenticated (or authenticated) request from streaming an
+	// arbitrarily large body into the server's memory.  1 MiB is generous for
+	// any legitimate chat API payload (max message body is 64 KiB; op batches
+	// are capped at 500 × 64 KiB = 32 MiB in theory, but the handler also
+	// enforces the per-op body cap, so 1 MiB at the HTTP layer still blocks
+	// the overwhelming majority of abuse).
+	api.Use(func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20) // 1 MiB
+		c.Next()
+	})
+
 	// Protected API routes.
 	// TalkAuth accepts EITHER a session JWT (existing behaviour) OR a
 	// cloud-issued `Authorization: Bearer vk_…` API key validated via the
@@ -198,10 +211,10 @@ func main() {
 	// Spaces: channels, DMs, threads, messages, reactions, pins, status, search.
 	spacesHandler := handlers.NewSpacesHandlerExt()
 	protected.GET("/spaces/channels", spacesHandler.ListChannels)
-	protected.POST("/spaces/channels", spacesHandler.CreateChannel)
-	protected.POST("/spaces/channels/:channelId/join", spacesHandler.JoinChannel)
+	protected.POST("/spaces/channels", spacesWriteRL, spacesHandler.CreateChannel)
+	protected.POST("/spaces/channels/:channelId/join", spacesWriteRL, spacesHandler.JoinChannel)
 	protected.GET("/spaces/channels/:channelId/members", spacesHandler.ListMembers)
-	protected.POST("/spaces/channels/:channelId/members", spacesHandler.InviteMember)
+	protected.POST("/spaces/channels/:channelId/members", spacesWriteRL, spacesHandler.InviteMember)
 	protected.PUT("/spaces/channels/:channelId/members/me/name", spacesHandler.SetMyDisplayName)
 	protected.GET("/spaces/channels/:channelId/messages", spacesHandler.ListMessages)
 	protected.POST("/spaces/channels/:channelId/messages", spacesWriteRL, spacesHandler.SendMessage)
@@ -210,7 +223,7 @@ func main() {
 	protected.POST("/spaces/channels/:channelId/read", spacesHandler.MarkRead)
 	protected.GET("/spaces/channels/:channelId/read", spacesHandler.GetReadState)
 	protected.GET("/spaces/channels/:channelId/ops", spacesHandler.ExportOps)
-	protected.POST("/spaces/ops", spacesHandler.MergeOps)
+	protected.POST("/spaces/ops", spacesWriteRL, spacesHandler.MergeOps)
 	protected.GET("/spaces/channels/:channelId/reactions", spacesHandler.ListReactions)
 	protected.POST("/spaces/messages/:msgId/react", spacesWriteRL, spacesHandler.React)
 	protected.DELETE("/spaces/messages/:msgId/react", spacesWriteRL, spacesHandler.Unreact)

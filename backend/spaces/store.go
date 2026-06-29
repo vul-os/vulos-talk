@@ -36,18 +36,26 @@ import (
 var ErrMemberNotFound = errors.New("spaces: membership not found")
 
 // MaxMessageBytes caps the size of a single user-authored message body on the
-// local write path (SendMessage / EditMessage). Chat messages are small; an
-// unbounded body is a memory/DoS amplification vector (one POST can pin an
-// arbitrarily large blob in the in-memory index and the durable log). 64 KiB is
-// far above any legitimate chat message yet bounds the blast radius. The merge
-// path (applyRemote) is intentionally NOT capped here: rejecting a peer's op
-// mid-stream would break CRDT convergence; replication trust is enforced
-// upstream (MergeOpsAs author binding + channel membership gating).
+// local write path (SendMessage / EditMessage) AND on the CRDT merge path
+// (MergeOpsAs). Chat messages are small; an unbounded body is a memory/DoS
+// amplification vector (one POST can pin an arbitrarily large blob in the
+// in-memory index and the durable log). 64 KiB is far above any legitimate
+// chat message yet bounds the blast radius.
 const MaxMessageBytes = 64 * 1024
 
-// ErrMessageTooLarge is returned by SendMessage / EditMessage when the body
-// exceeds MaxMessageBytes.
+// MaxMergeOpsPerBatch is the maximum number of ops accepted in a single
+// MergeOps / MergeOpsAs call.  Batches larger than this are rejected in full
+// (HTTP 400) before any op is applied, preventing a single request from
+// flooding the in-memory index or the durable log.
+const MaxMergeOpsPerBatch = 500
+
+// ErrMessageTooLarge is returned by SendMessage / EditMessage / MergeOpsAs
+// when a message body exceeds MaxMessageBytes.
 var ErrMessageTooLarge = fmt.Errorf("spaces: message body exceeds %d bytes", MaxMessageBytes)
+
+// ErrBatchTooLarge is returned by MergeOpsAs when the ops slice exceeds
+// MaxMergeOpsPerBatch.
+var ErrBatchTooLarge = fmt.Errorf("spaces: op batch exceeds %d ops", MaxMergeOpsPerBatch)
 
 // -------------------------------------------------------------------------
 // Hybrid Logical Clock (simple wall+counter variant)
@@ -615,6 +623,9 @@ func (s *SpacesStore) MergeOpsAs(authUser string, ops []*models.MessageOp) error
 	if authUser == "" {
 		return fmt.Errorf("spaces: MergeOpsAs requires an authenticated user")
 	}
+	if len(ops) > MaxMergeOpsPerBatch {
+		return ErrBatchTooLarge
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -622,6 +633,12 @@ func (s *SpacesStore) MergeOpsAs(authUser string, ops []*models.MessageOp) error
 	for _, op := range ops {
 		if op.Msg.AuthorID != authUser {
 			return fmt.Errorf("spaces: op author %q does not match authenticated user %q", op.Msg.AuthorID, authUser)
+		}
+		// Reject ops whose body exceeds the per-message size cap.  The merge
+		// path must enforce the same bound as the local write path: a peer
+		// cannot bypass the DoS guard by routing through CRDT replication.
+		if len(op.Msg.Body) > MaxMessageBytes {
+			return fmt.Errorf("spaces: op body for message %q exceeds %d bytes: %w", op.Msg.ID, MaxMessageBytes, ErrMessageTooLarge)
 		}
 		// If the target already exists, the existing author must also match —
 		// guards against tombstoning/editing a message id whose body was
