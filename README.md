@@ -160,6 +160,32 @@ storage backend). The full reference — including the JWT signing secret,
 CORS allowlist, and the optional cloud seam — is in
 [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+### Message store backend (SQLite ↔ Postgres)
+
+The CRDT message store (channels, messages, threads, reactions, pins,
+read-state, presence) selects its durable backend at runtime from the
+environment — the public API and behavior are identical on both:
+
+| Environment | Backend | Notes |
+|-------------|---------|-------|
+| _unset_ (default) | **Embedded SQLite** | Self-host / open-core path. File at `VULOS_SPACES_DB` (default `./data/spaces.db`); `:memory:` for ephemeral. No external services. |
+| `DATABASE_URL` set | **Postgres**, schema `talk` | Cloud consolidation: one (Neon) database shared across Vulos products. All tables are created under, and scoped to, the `talk` schema (schema-qualified + `search_path`). |
+| `VULOS_DATABASE_URL` set | **Postgres**, schema `talk` | Namespaced alias for `DATABASE_URL` (used when `DATABASE_URL` is unset). |
+
+`DATABASE_URL` accepts a URL DSN (`postgres://user:pass@host:5432/db?sslmode=require`)
+or a keyword DSN. The schema and all tables are created automatically on first
+connect (idempotent migrations); no manual setup is required. Leaving the
+variable unset keeps the embedded SQLite default entirely unchanged.
+
+To run the Postgres-path tests locally, point `VULOS_TEST_POSTGRES` at a
+throwaway database and run `go test ./...` (the test is skipped when unset; CI
+runs it in a dedicated Postgres job):
+
+```sh
+export VULOS_TEST_POSTGRES='postgres://postgres:postgres@localhost:5432/talk_test?sslmode=disable'
+go test ./backend/spaces/...
+```
+
 ### Live frontend (development)
 
 ```sh

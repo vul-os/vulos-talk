@@ -47,12 +47,36 @@ func spacesDBPath() string {
 	return "./data/spaces.db"
 }
 
-// NewSpacesHandler wires a durable SQLite-backed store. If the DB cannot be
-// opened it falls back to the in-memory NullPersister so the app still boots
-// (degraded: no persistence) rather than crashing.
+// spacesPostgresDSN resolves the Postgres DSN for cloud consolidation. When set,
+// the SpacesStore persists into a dedicated `talk` schema so one (Neon) database
+// can be shared across Vulos products. DATABASE_URL is the standard name;
+// VULOS_DATABASE_URL is accepted as a namespaced alias. Empty means "use the
+// embedded SQLite default" (self-host / open-core path, unchanged).
+func spacesPostgresDSN() string {
+	if v := os.Getenv("DATABASE_URL"); v != "" {
+		return v
+	}
+	return os.Getenv("VULOS_DATABASE_URL")
+}
+
+// NewSpacesHandler wires the durable Persister selected at runtime:
+//   - DATABASE_URL / VULOS_DATABASE_URL set → Postgres backend, schema `talk`.
+//   - otherwise → embedded SQLite at VULOS_SPACES_DB (default ./data/spaces.db).
+//
+// If the selected backend cannot be opened it falls back to the in-memory
+// NullPersister so the app still boots (degraded: no persistence) rather than
+// crashing.
 func NewSpacesHandler() *SpacesHandler {
 	var p spaces.Persister
-	if sp, err := spaces.NewSQLitePersister(spacesDBPath()); err != nil {
+	if dsn := spacesPostgresDSN(); dsn != "" {
+		if pg, err := spaces.NewPostgresPersister(dsn); err != nil {
+			log.Printf("spaces: postgres persister unavailable (%v); falling back to in-memory store", err)
+			p = spaces.NewNullPersister()
+		} else {
+			log.Printf("spaces: using Postgres backend (schema=%s)", spaces.PostgresSchema)
+			p = pg
+		}
+	} else if sp, err := spaces.NewSQLitePersister(spacesDBPath()); err != nil {
 		log.Printf("spaces: durable persister unavailable (%v); falling back to in-memory store", err)
 		p = spaces.NewNullPersister()
 	} else {

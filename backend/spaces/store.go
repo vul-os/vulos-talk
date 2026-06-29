@@ -127,7 +127,9 @@ func (h *hlc) Receive(remote string) {
 // -------------------------------------------------------------------------
 
 // Persister is the interface the store calls to durably write state.
-// Implementations in local.go and postgres.go satisfy this interface.
+// Implementations in sqlite.go (embedded default) and postgres.go (cloud
+// consolidation, schema `talk`) satisfy this interface, as does the in-memory
+// NullPersister below.
 type Persister interface {
 	// Channels
 	SaveChannel(ch *models.Channel) error
