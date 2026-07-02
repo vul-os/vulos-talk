@@ -534,15 +534,43 @@ func (h *SpacesHandler) MergeOps(c *gin.Context) {
 
 // InviteMember handles POST /api/spaces/channels/:channelId/members.
 // Body: { account_id: string, display_name?: string }
-// Authz: the requester must already be a member of the channel to invite others.
-// Private and DM channels enforce membership; public channels allow any member to invite.
+// Authz: the requester must already be an actual MEMBER of the channel to invite
+// others. requireChannelAccess alone is insufficient because for public channels
+// it returns true for ANY authenticated user, letting a non-member seed arbitrary
+// accounts/display-names onto the roster (WAVE15-LOW). Membership is therefore
+// checked explicitly below.
+//
+// DM channels are immutable: a 2-person DM cannot gain a third participant, since
+// there is no leave/remove route to undo an unwanted addition and doing so would
+// expose the private conversation without the other party's consent
+// (WAVE15-MEDIUM). Any InviteMember on a DM is rejected. (A future "convert DM to
+// group" flow, if desired, is a separate, explicit operation.)
+//
 // Returns 409 if the account is already a member.
 func (h *SpacesHandler) InviteMember(c *gin.Context) {
 	channelID := c.Param("channelId")
 	requester := requesterID(c)
 
-	// The requester must be a member (or the channel must be accessible).
+	// The channel must exist and be accessible to the requester.
 	if !h.requireChannelAccess(c, channelID, requester) {
+		return
+	}
+
+	// DMs are immutable — reject any attempt to add a third party.
+	ch, ok := h.store.GetChannel(channelID)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
+		return
+	}
+	if ch.Type == models.ChannelTypeDM {
+		c.JSON(http.StatusForbidden, gin.H{"error": "cannot add members to a direct message"})
+		return
+	}
+
+	// The requester must be an ACTUAL member (not merely have public read access)
+	// before they may add anyone else.
+	if !h.store.IsMember(channelID, requester) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only a member can invite others to this channel"})
 		return
 	}
 

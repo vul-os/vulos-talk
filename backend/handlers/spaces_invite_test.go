@@ -151,6 +151,107 @@ func TestInviteMember_NonMemberDenied(t *testing.T) {
 	}
 }
 
+// inviteMsgRouter wires CreateChannel + InviteMember + ListMessages for the
+// DM/public-channel authz regression tests, which need to probe read access.
+func inviteMsgRouter(h *SpacesHandlerExt, verifiedUser string) *gin.Engine {
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(middleware.CtxAuthenticated, true)
+		c.Set(middleware.CtxUserID, verifiedUser)
+		c.Next()
+	})
+	r.POST("/spaces/channels/:channelId/members", h.InviteMember)
+	r.GET("/spaces/channels/:channelId/messages", h.ListMessages)
+	return r
+}
+
+// TestInviteMember_DMImmutable (WAVE15-MEDIUM) confirms a participant in a
+// 2-person DM cannot inject an arbitrary outsider, and the outsider still
+// cannot read the private conversation afterward.
+func TestInviteMember_DMImmutable(t *testing.T) {
+	h := testHandler(t)
+
+	// Create a DM between alice and bob directly via the store (DMs are not
+	// created through the public CreateChannel invite flow).
+	dm, err := h.store.CreateChannel("dm-alice-bob", models.ChannelTypeDM, "alice")
+	if err != nil {
+		t.Fatalf("create DM: %v", err)
+	}
+	if _, err := h.store.AddMember(dm.ID, "alice"); err != nil {
+		t.Fatalf("add alice: %v", err)
+	}
+	if _, err := h.store.AddMember(dm.ID, "bob"); err != nil {
+		t.Fatalf("add bob: %v", err)
+	}
+	if _, err := h.store.SendMessage(dm.ID, "alice", "private between us", ""); err != nil {
+		t.Fatalf("seed DM message: %v", err)
+	}
+
+	// alice (a real participant) attempts to add eve — must be rejected.
+	alice := inviteMsgRouter(h, "alice")
+	inviteReq := struct {
+		AccountID string `json:"account_id"`
+	}{AccountID: "eve@x.com"}
+	req, w := newRequest(http.MethodPost, "/spaces/channels/"+dm.ID+"/members", "alice", "", inviteReq)
+	alice.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("VULN: DM participant added a third party — expected 403, got %d (%s)", w.Code, w.Body.String())
+	}
+	if h.store.IsMember(dm.ID, "eve@x.com") {
+		t.Fatal("VULN: eve was added to the DM roster")
+	}
+
+	// eve remains a non-member and cannot read the DM.
+	eve := inviteMsgRouter(h, "eve@x.com")
+	req, w = newRequest(http.MethodGet, "/spaces/channels/"+dm.ID+"/messages", "eve@x.com", "", nil)
+	eve.ServeHTTP(w, req)
+	if w.Code == http.StatusOK {
+		t.Fatalf("VULN: non-participant eve read the DM — got 200 (%s)", w.Body.String())
+	}
+}
+
+// TestInviteMember_PublicChannelNonMemberDenied (WAVE15-LOW) confirms a caller
+// who is NOT a member of a public channel cannot add arbitrary accounts, while a
+// real member still can.
+func TestInviteMember_PublicChannelNonMemberDenied(t *testing.T) {
+	h := testHandler(t)
+
+	// Public channel owned by alice (alice is the sole member).
+	pub, err := h.store.CreateChannel("townsquare", models.ChannelTypePublic, "alice")
+	if err != nil {
+		t.Fatalf("create public channel: %v", err)
+	}
+	if _, err := h.store.AddMember(pub.ID, "alice"); err != nil {
+		t.Fatalf("add alice: %v", err)
+	}
+
+	// mallory has public *access* but is NOT a member — she must not invite.
+	mallory := inviteMsgRouter(h, "mallory@x.com")
+	inviteReq := struct {
+		AccountID   string `json:"account_id"`
+		DisplayName string `json:"display_name"`
+	}{AccountID: "victim@x.com", DisplayName: "Totally Legit"}
+	req, w := newRequest(http.MethodPost, "/spaces/channels/"+pub.ID+"/members", "mallory@x.com", "", inviteReq)
+	mallory.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("VULN: non-member invited to a public channel — expected 403, got %d (%s)", w.Code, w.Body.String())
+	}
+	if h.store.IsMember(pub.ID, "victim@x.com") {
+		t.Fatal("VULN: non-member seeded an arbitrary account onto the public roster")
+	}
+
+	// alice, a real member, CAN still invite on the public channel.
+	alice := inviteMsgRouter(h, "alice")
+	req, w = newRequest(http.MethodPost, "/spaces/channels/"+pub.ID+"/members", "alice", "", inviteReq)
+	alice.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("member invite on public channel: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	if !h.store.IsMember(pub.ID, "victim@x.com") {
+		t.Fatal("legitimate member invite did not add the account")
+	}
+}
+
 // TestInviteMember_WithoutDisplayName confirms that an invite without a
 // display_name falls back to the account id in the roster.
 func TestInviteMember_WithoutDisplayName(t *testing.T) {
